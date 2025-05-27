@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Lato:wght@300;400;700&display=swap');
+
+:root {
+  --background: 210 11% 98%; /* #F8F9FA */
+  --foreground: 214 31% 31%; /* #2C3E50 */
+  --muted: 210 11% 96%; /* #F5F6FA */
+  --muted-foreground: 215 16% 47%; /* #6C757D */
+  --popover: 0 0% 100%;
+  --popover-foreground: 214 31% 31%; /* #2C3E50 */
+  --card: 0 0% 100%;
+  --card-foreground: 214 31% 31%; /* #2C3E50 */
+  --border: 214 13% 91%; /* #E9ECEF */
+  --input: 214 13% 91%; /* #E9ECEF */
+  --primary: 145 63% 42%; /* #27AE60 */
+  --primary-foreground: 210 40% 98%;
+  --secondary: 35 84% 62%; /* #F39C12 */
+  --secondary-foreground: 210 40% 98%;
+  --accent: 4 90% 58%; /* #E74C3C */
+  --accent-foreground: 210 40% 98%;
+  --destructive: 4 90% 58%; /* #E74C3C */
+  --destructive-foreground: 210 40% 98%;
+  --ring: 145 63% 42%; /* #27AE60 */
+  --radius: 0.5rem;
+  --chart-1: 145 63% 42%;
+  --chart-2: 35 84% 62%;
+  --chart-3: 4 90% 58%;
+  --chart-4: 215 16% 47%;
+  --chart-5: 214 31% 31%;
+}
+
+.dark {
+  --background: 224 71% 4%;
+  --foreground: 213 31% 91%;
+  --muted: 223 47% 11%;
+  --muted-foreground: 215 20% 65%;
+  --popover: 224 71% 4%;
+  --popover-foreground: 215 20% 65%;
+  --card: 224 71% 4%;
+  --card-foreground: 213 31% 91%;
+  --border: 216 34% 17%;
+  --input: 216 34% 17%;
+  --primary: 145 63% 42%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 35 84% 62%;
+  --secondary-foreground: 210 40% 98%;
+  --accent: 4 90% 58%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 4 90% 58%;
+  --destructive-foreground: 210 40% 98%;
+  --ring: 145 63% 42%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-lato antialiased bg-background text-foreground;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-poppins;
+  }
+}
+
+@layer utilities {
+  .font-poppins {
+    font-family: 'Poppins', sans-serif;
+  }
+  
+  .font-lato {
+    font-family: 'Lato', sans-serif;
+  }
+}
