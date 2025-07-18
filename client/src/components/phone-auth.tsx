@@ -39,9 +39,18 @@ export default function PhoneAuth() {
       });
       setStep("otp");
     } catch (error: any) {
+      console.error("Send OTP error:", error);
+      let errorMessage = "Failed to send OTP";
+      
+      if (error.message) {
+        // Extract meaningful error message
+        const match = error.message.match(/\d+:\s*(.+)/);
+        errorMessage = match ? match[1] : error.message;
+      }
+      
       toast({
         title: "Error",
-        description: error.message || "Failed to send OTP",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -75,9 +84,18 @@ export default function PhoneAuth() {
       // Invalidate auth query to trigger re-fetch
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
     } catch (error: any) {
+      console.error("Verify OTP error:", error);
+      let errorMessage = "Invalid verification code";
+      
+      if (error.message) {
+        // Extract meaningful error message
+        const match = error.message.match(/\d+:\s*(.+)/);
+        errorMessage = match ? match[1] : error.message;
+      }
+      
       toast({
         title: "Error", 
-        description: error.message || "Invalid verification code",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
