@@ -4,12 +4,14 @@
 A full-stack e-commerce application built with React, Express, and PostgreSQL. Features phone-based SMS OTP authentication, product catalog with categories, shopping cart, and order management.
 
 ## Architecture
-- **Frontend**: React with Vite, TailwindCSS, shadcn/ui components
+- **Web Frontend**: React with Vite, TailwindCSS, shadcn/ui components
+- **Mobile App**: React Native with Expo, React Native Paper components
 - **Backend**: Express.js with TypeScript
-- **Database**: PostgreSQL with Drizzle ORM
-- **Authentication**: Phone number + SMS OTP via Twilio
-- **State Management**: TanStack Query for server state
-- **Routing**: Wouter for client-side routing
+- **Database**: Google Sheets integration with fallback to PostgreSQL/in-memory storage
+- **Authentication**: Phone number + SMS OTP via Twilio (both web and mobile)
+- **State Management**: TanStack Query for server state (both platforms)
+- **Routing**: Wouter for web, React Navigation for mobile
+- **Mobile Navigation**: Bottom tabs + stack navigation with Material Design
 
 ## Recent Changes
 - ✅ Successfully migrated from Replit Agent to standard Replit environment
@@ -19,6 +21,12 @@ A full-stack e-commerce application built with React, Express, and PostgreSQL. F
 - ✅ Verified full application functionality and security
 - ✅ Added smart seeding system that only populates empty database
 - ✅ Confirmed SMS authentication working with real phone numbers
+- ✅ Fixed Vercel deployment configuration for SPA routing
+- ✅ Created complete React Native mobile app conversion with Expo
+- ✅ Implemented all mobile screens: Login, Home, Products, Cart, Orders, Profile
+- ✅ Added React Navigation with bottom tabs and stack navigation
+- ✅ Integrated TanStack Query for mobile state management
+- ✅ Used React Native Paper for Material Design components
 
 ## User Preferences
 - Simple, everyday language in communications
