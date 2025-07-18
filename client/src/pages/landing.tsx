@@ -1,11 +1,23 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ShoppingBasket, Truck, Clock, Shield } from "lucide-react";
+import PhoneAuth from "@/components/phone-auth";
 
 export default function Landing() {
+  const [showAuth, setShowAuth] = useState(false);
+
   const handleLogin = () => {
-    window.location.href = "/api/login";
+    setShowAuth(true);
   };
+
+  if (showAuth) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <PhoneAuth />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">

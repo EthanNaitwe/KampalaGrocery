@@ -25,8 +25,13 @@ export function Navbar({ onCartClick, showCart = true }: NavbarProps) {
 
   const cartItemCount = cartItems.reduce((total, item) => total + item.quantity, 0);
 
-  const handleLogout = () => {
-    window.location.href = "/api/logout";
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.reload();
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
 
   return (
@@ -77,9 +82,8 @@ export function Navbar({ onCartClick, showCart = true }: NavbarProps) {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                   <Avatar className="h-8 w-8">
-                    <AvatarImage src={user?.profileImageUrl || ""} alt={user?.firstName || ""} />
                     <AvatarFallback>
-                      {user?.firstName?.[0] || user?.email?.[0] || <User size={16} />}
+                      {user?.firstName?.[0] || user?.phoneNumber?.[0] || <User size={16} />}
                     </AvatarFallback>
                   </Avatar>
                 </Button>
@@ -90,9 +94,9 @@ export function Navbar({ onCartClick, showCart = true }: NavbarProps) {
                     {user?.firstName && (
                       <p className="font-medium">{user.firstName}</p>
                     )}
-                    {user?.email && (
+                    {user?.phoneNumber && (
                       <p className="w-[200px] truncate text-sm text-muted-foreground">
-                        {user.email}
+                        {user.phoneNumber}
                       </p>
                     )}
                   </div>

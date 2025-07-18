@@ -1,8 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertProductSchema, insertCategorySchema, insertCartItemSchema, updateOrderStatusSchema } from "@shared/schema";
+import { setupAuth, isAuthenticated, sendOTP, verifyOTP, logout } from "./smsAuth";
+import { insertProductSchema, insertCategorySchema, insertCartItemSchema, updateOrderStatusSchema, sendOtpSchema, verifyOtpSchema } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -10,14 +10,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
 
   // Auth routes
+  app.post('/api/auth/send-otp', async (req, res) => {
+    try {
+      const validatedData = sendOtpSchema.parse(req.body);
+      const result = await sendOTP(validatedData.phoneNumber);
+      
+      if (result.success) {
+        res.json({ message: result.message });
+      } else {
+        res.status(400).json({ message: result.message });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid phone number", errors: error.errors });
+      }
+      console.error("Error sending OTP:", error);
+      res.status(500).json({ message: "Failed to send OTP" });
+    }
+  });
+
+  app.post('/api/auth/verify-otp', async (req: any, res) => {
+    try {
+      const validatedData = verifyOtpSchema.parse(req.body);
+      const result = await verifyOTP(validatedData.phoneNumber, validatedData.otp, req);
+      
+      if (result.success) {
+        res.json({ message: result.message, user: result.user });
+      } else {
+        res.status(400).json({ message: result.message });
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      }
+      console.error("Error verifying OTP:", error);
+      res.status(500).json({ message: "Failed to verify OTP" });
+    }
+  });
+
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      res.json(user);
+      res.json(req.user);
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  app.post('/api/auth/logout', async (req: any, res) => {
+    try {
+      await logout(req);
+      res.json({ message: "Logged out successfully" });
+    } catch (error) {
+      console.error("Error logging out:", error);
+      res.status(500).json({ message: "Failed to logout" });
     }
   });
 
@@ -34,10 +80,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/categories', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      
-      if (!user?.isAdmin) {
+      if (!req.user?.isAdmin) {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -91,10 +134,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/products', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      
-      if (!user?.isAdmin) {
+      if (!req.user?.isAdmin) {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -112,10 +152,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put('/api/products/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      
-      if (!user?.isAdmin) {
+      if (!req.user?.isAdmin) {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -134,10 +171,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/products/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      
-      if (!user?.isAdmin) {
+      if (!req.user?.isAdmin) {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -153,7 +187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Cart routes
   app.get('/api/cart', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const cartItems = await storage.getCartItems(userId);
       res.json(cartItems);
     } catch (error) {
@@ -164,7 +198,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/cart', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const validatedData = insertCartItemSchema.parse({
         ...req.body,
         userId,
@@ -183,7 +217,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put('/api/cart/:productId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const productId = parseInt(req.params.productId);
       const { quantity } = req.body;
       
@@ -197,7 +231,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/cart/:productId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const productId = parseInt(req.params.productId);
       
       await storage.removeFromCart(userId, productId);
@@ -210,7 +244,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/cart', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       await storage.clearCart(userId);
       res.status(204).send();
     } catch (error) {
@@ -222,11 +256,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Order routes
   app.get('/api/orders', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
+      const userId = req.user.id;
       
       let orders;
-      if (user?.isAdmin) {
+      if (req.user?.isAdmin) {
         orders = await storage.getOrders();
       } else {
         orders = await storage.getUserOrders(userId);
@@ -257,7 +290,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/orders', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const { customerEmail, customerPhone, deliveryAddress, notes } = req.body;
       
       // Get cart items
@@ -299,10 +332,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put('/api/orders/:id/status', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      
-      if (!user?.isAdmin) {
+      if (!req.user?.isAdmin) {
         return res.status(403).json({ message: "Admin access required" });
       }
 

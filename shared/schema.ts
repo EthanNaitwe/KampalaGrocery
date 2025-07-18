@@ -27,16 +27,24 @@ export const sessions = pgTable(
 );
 
 // User storage table.
-// (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().notNull(),
-  email: varchar("email").unique(),
+  phoneNumber: varchar("phone_number").unique().notNull(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
-  profileImageUrl: varchar("profile_image_url"),
   isAdmin: boolean("is_admin").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// OTP verification table for SMS authentication
+export const otpVerifications = pgTable("otp_verifications", {
+  id: serial("id").primaryKey(),
+  phoneNumber: varchar("phone_number").notNull(),
+  otp: varchar("otp", { length: 4 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  verified: boolean("verified").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const categories = pgTable("categories", {
@@ -140,6 +148,9 @@ export const cartItemsRelations = relations(cartItems, ({ one }) => ({
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 
+export type InsertOtpVerification = typeof otpVerifications.$inferInsert;
+export type OtpVerification = typeof otpVerifications.$inferSelect;
+
 export type InsertCategory = typeof categories.$inferInsert;
 export type Category = typeof categories.$inferSelect;
 
@@ -180,4 +191,13 @@ export const insertCartItemSchema = createInsertSchema(cartItems).omit({
 
 export const updateOrderStatusSchema = z.object({
   status: z.enum(["pending", "confirmed", "preparing", "out_for_delivery", "delivered", "cancelled"]),
+});
+
+export const sendOtpSchema = z.object({
+  phoneNumber: z.string().min(10, "Phone number must be at least 10 digits"),
+});
+
+export const verifyOtpSchema = z.object({
+  phoneNumber: z.string().min(10, "Phone number must be at least 10 digits"),
+  otp: z.string().length(4, "OTP must be 4 digits"),
 });
