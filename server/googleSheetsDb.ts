@@ -68,7 +68,7 @@ async function ensureSheetExists(sheetName: string, headers: string[]) {
   }
 }
 
-// Helper function to get all rows from a sheet
+// Helper function to get all rows from a sheet with retry logic
 async function getSheetData(sheetName: string): Promise<any[]> {
   try {
     const response = await sheets.spreadsheets.values.get({
@@ -89,6 +89,10 @@ async function getSheetData(sheetName: string): Promise<any[]> {
     });
   } catch (error) {
     console.error(`Error getting data from sheet ${sheetName}:`, error);
+    // If quota exceeded, throw error to trigger fallback
+    if (error.code === 429) {
+      throw new Error('Google Sheets quota exceeded');
+    }
     return [];
   }
 }
