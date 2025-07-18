@@ -5,6 +5,9 @@ import { initializeSheets } from "./googleSheetsDb";
 import { seedDatabase } from "./seedData";
 
 const app = express();
+
+// Export app for Vercel
+export { app };
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
