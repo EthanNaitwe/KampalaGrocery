@@ -95,10 +95,28 @@ const sampleProducts = [
 
 export async function seedDatabase() {
   try {
-    console.log("Seeding database with sample data...");
+    console.log("Checking if database needs seeding...");
     
     // First, try Google Sheets, fallback to memory storage if needed
     let useGoogleSheets = true;
+    
+    // Check if categories already exist
+    let existingCategories = [];
+    try {
+      existingCategories = await googleSheetsDb.getCategories();
+    } catch (error) {
+      console.log("Falling back to memory storage for checking categories");
+      useGoogleSheets = false;
+      existingCategories = await fallbackStorage.getCategories();
+    }
+    
+    // Only seed if no categories exist
+    if (existingCategories.length > 0) {
+      console.log("Database already has data, skipping seeding...");
+      return;
+    }
+    
+    console.log("Seeding database with sample data...");
     
     // Create categories
     const createdCategories = [];
