@@ -1,10 +1,4 @@
 import {
-  users,
-  categories,
-  products,
-  orders,
-  orderItems,
-  cartItems,
   type User,
   type UpsertUser,
   type Category,
@@ -16,8 +10,8 @@ import {
   type CartItem,
   type InsertCartItem,
 } from "@shared/schema";
-import { db } from "./db";
-import { eq, and, desc, asc, or, ilike } from "drizzle-orm";
+import { googleSheetsDb } from "./googleSheetsDb";
+import { fallbackStorage } from "./fallbackStorage";
 
 export interface IStorage {
   // User operations
@@ -52,243 +46,306 @@ export interface IStorage {
   updateOrderStatus(id: number, status: string): Promise<Order>;
 }
 
-export class DatabaseStorage implements IStorage {
+export class GoogleSheetsStorage implements IStorage {
   // User operations
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    return await googleSheetsDb.getUserById(id);
   }
 
   async getUserByPhone(phoneNumber: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.phoneNumber, phoneNumber));
-    return user;
+    return await googleSheetsDb.getUserByPhone(phoneNumber);
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const [user] = await db
-      .insert(users)
-      .values(userData)
-      .onConflictDoUpdate({
-        target: users.phoneNumber,
-        set: {
-          ...userData,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-    return user;
+    const existingUser = await googleSheetsDb.getUserByPhone(userData.phoneNumber);
+    
+    if (existingUser) {
+      return await googleSheetsDb.updateUser(existingUser.id, userData);
+    } else {
+      return await googleSheetsDb.createUser(userData);
+    }
   }
 
   // Category operations
   async getCategories(): Promise<Category[]> {
-    return await db.select().from(categories).orderBy(asc(categories.name));
+    return await googleSheetsDb.getCategories();
   }
 
   async createCategory(category: InsertCategory): Promise<Category> {
-    const [newCategory] = await db.insert(categories).values(category).returning();
-    return newCategory;
+    return await googleSheetsDb.createCategory(category);
   }
 
   // Product operations
   async getProducts(categoryId?: number): Promise<Product[]> {
-    if (categoryId) {
-      return await db
-        .select()
-        .from(products)
-        .where(eq(products.categoryId, categoryId))
-        .orderBy(asc(products.name));
-    }
-    return await db.select().from(products).orderBy(asc(products.name));
+    return await googleSheetsDb.getProducts(categoryId);
   }
 
   async getProduct(id: number): Promise<Product | undefined> {
-    const [product] = await db.select().from(products).where(eq(products.id, id));
-    return product;
+    return await googleSheetsDb.getProductById(id);
   }
 
   async createProduct(product: InsertProduct): Promise<Product> {
-    const [newProduct] = await db.insert(products).values(product).returning();
-    return newProduct;
+    return await googleSheetsDb.createProduct(product);
   }
 
   async updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product> {
-    const [updatedProduct] = await db
-      .update(products)
-      .set({ ...product, updatedAt: new Date() })
-      .where(eq(products.id, id))
-      .returning();
-    return updatedProduct;
+    return await googleSheetsDb.updateProduct(id, product);
   }
 
   async deleteProduct(id: number): Promise<void> {
-    await db.delete(products).where(eq(products.id, id));
+    return await googleSheetsDb.deleteProduct(id);
   }
 
   async searchProducts(query: string): Promise<Product[]> {
-    const searchPattern = `%${query.toLowerCase()}%`;
-    return await db
-      .select()
-      .from(products)
-      .where(
-        or(
-          ilike(products.name, searchPattern),
-          ilike(products.description, searchPattern)
-        )
-      )
-      .orderBy(asc(products.name));
+    return await googleSheetsDb.searchProducts(query);
   }
 
   // Cart operations
   async getCartItems(userId: string): Promise<(CartItem & { product: Product })[]> {
-    return await db
-      .select({
-        id: cartItems.id,
-        userId: cartItems.userId,
-        productId: cartItems.productId,
-        quantity: cartItems.quantity,
-        createdAt: cartItems.createdAt,
-        product: products,
-      })
-      .from(cartItems)
-      .leftJoin(products, eq(cartItems.productId, products.id))
-      .where(eq(cartItems.userId, userId));
+    return await googleSheetsDb.getCartItems(userId);
   }
 
   async addToCart(cartItem: InsertCartItem): Promise<CartItem> {
-    // Check if item already exists in cart
-    const [existingItem] = await db
-      .select()
-      .from(cartItems)
-      .where(
-        and(
-          eq(cartItems.userId, cartItem.userId),
-          eq(cartItems.productId, cartItem.productId)
-        )
-      );
-
-    if (existingItem) {
-      // Update quantity
-      const [updatedItem] = await db
-        .update(cartItems)
-        .set({ quantity: existingItem.quantity + cartItem.quantity })
-        .where(eq(cartItems.id, existingItem.id))
-        .returning();
-      return updatedItem;
-    } else {
-      // Add new item
-      const [newItem] = await db.insert(cartItems).values(cartItem).returning();
-      return newItem;
-    }
+    return await googleSheetsDb.addToCart(cartItem);
   }
 
   async updateCartItemQuantity(userId: string, productId: number, quantity: number): Promise<void> {
-    if (quantity <= 0) {
-      await this.removeFromCart(userId, productId);
-    } else {
-      await db
-        .update(cartItems)
-        .set({ quantity })
-        .where(
-          and(
-            eq(cartItems.userId, userId),
-            eq(cartItems.productId, productId)
-          )
-        );
-    }
+    return await googleSheetsDb.updateCartItemQuantity(userId, productId, quantity);
   }
 
   async removeFromCart(userId: string, productId: number): Promise<void> {
-    await db
-      .delete(cartItems)
-      .where(
-        and(
-          eq(cartItems.userId, userId),
-          eq(cartItems.productId, productId)
-        )
-      );
+    return await googleSheetsDb.removeFromCart(userId, productId);
   }
 
   async clearCart(userId: string): Promise<void> {
-    await db.delete(cartItems).where(eq(cartItems.userId, userId));
+    return await googleSheetsDb.clearCart(userId);
   }
 
   // Order operations
   async getOrders(): Promise<(Order & { user: User })[]> {
-    return await db
-      .select({
-        id: orders.id,
-        userId: orders.userId,
-        status: orders.status,
-        total: orders.total,
-        customerEmail: orders.customerEmail,
-        customerPhone: orders.customerPhone,
-        deliveryAddress: orders.deliveryAddress,
-        notes: orders.notes,
-        createdAt: orders.createdAt,
-        updatedAt: orders.updatedAt,
-        user: users,
-      })
-      .from(orders)
-      .leftJoin(users, eq(orders.userId, users.id))
-      .orderBy(desc(orders.createdAt));
+    return await googleSheetsDb.getOrders();
   }
 
   async getUserOrders(userId: string): Promise<Order[]> {
-    return await db
-      .select()
-      .from(orders)
-      .where(eq(orders.userId, userId))
-      .orderBy(desc(orders.createdAt));
+    return await googleSheetsDb.getUserOrders(userId);
   }
 
   async getOrder(id: number): Promise<(Order & { orderItems: Array<{ product: Product; quantity: number; price: string }> }) | undefined> {
-    const [order] = await db.select().from(orders).where(eq(orders.id, id));
-    if (!order) return undefined;
-
-    const items = await db
-      .select({
-        product: products,
-        quantity: orderItems.quantity,
-        price: orderItems.price,
-      })
-      .from(orderItems)
-      .leftJoin(products, eq(orderItems.productId, products.id))
-      .where(eq(orderItems.orderId, id));
-
-    return {
-      ...order,
-      orderItems: items,
-    };
+    return await googleSheetsDb.getOrderById(id);
   }
 
   async createOrder(order: InsertOrder, items: Array<{ productId: number; quantity: number; price: string }>): Promise<Order> {
-    return await db.transaction(async (tx) => {
-      const [newOrder] = await tx.insert(orders).values(order).returning();
-
-      const orderItemsData = items.map(item => ({
-        orderId: newOrder.id,
-        productId: item.productId,
-        quantity: item.quantity,
-        price: item.price,
-      }));
-
-      await tx.insert(orderItems).values(orderItemsData);
-
-      // Clear user's cart
-      await tx.delete(cartItems).where(eq(cartItems.userId, order.userId));
-
-      return newOrder;
-    });
+    return await googleSheetsDb.createOrder(order, items);
   }
 
   async updateOrderStatus(id: number, status: string): Promise<Order> {
-    const [updatedOrder] = await db
-      .update(orders)
-      .set({ status, updatedAt: new Date() })
-      .where(eq(orders.id, id))
-      .returning();
-    return updatedOrder;
+    return await googleSheetsDb.updateOrderStatus(id, status);
   }
 }
 
-export const storage = new DatabaseStorage();
+// Use fallback storage for now while Google Sheets permissions are being configured
+export const storage = {
+  // User operations
+  async getUser(id: string): Promise<User | undefined> {
+    try {
+      return await googleSheetsDb.getUserById(id);
+    } catch (error) {
+      console.log('Using fallback storage for users');
+      return await fallbackStorage.getUserById(id);
+    }
+  },
+
+  async getUserByPhone(phoneNumber: string): Promise<User | undefined> {
+    try {
+      return await googleSheetsDb.getUserByPhone(phoneNumber);
+    } catch (error) {
+      console.log('Using fallback storage for user lookup');
+      return await fallbackStorage.getUserByPhone(phoneNumber);
+    }
+  },
+
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    try {
+      const existingUser = await googleSheetsDb.getUserByPhone(userData.phoneNumber);
+      if (existingUser) {
+        return await googleSheetsDb.updateUser(existingUser.id, userData);
+      } else {
+        return await googleSheetsDb.createUser(userData);
+      }
+    } catch (error) {
+      console.log('Using fallback storage for user upsert');
+      const existingUser = await fallbackStorage.getUserByPhone(userData.phoneNumber);
+      if (existingUser) {
+        return await fallbackStorage.updateUser(existingUser.id, userData);
+      } else {
+        return await fallbackStorage.createUser(userData);
+      }
+    }
+  },
+
+  // Category operations
+  async getCategories(): Promise<Category[]> {
+    try {
+      return await googleSheetsDb.getCategories();
+    } catch (error) {
+      console.log('Using fallback storage for categories');
+      return await fallbackStorage.getCategories();
+    }
+  },
+
+  async createCategory(category: InsertCategory): Promise<Category> {
+    try {
+      return await googleSheetsDb.createCategory(category);
+    } catch (error) {
+      console.log('Using fallback storage for category creation');
+      return await fallbackStorage.createCategory(category);
+    }
+  },
+
+  // Product operations
+  async getProducts(categoryId?: number): Promise<Product[]> {
+    try {
+      return await googleSheetsDb.getProducts(categoryId);
+    } catch (error) {
+      console.log('Using fallback storage for products');
+      return await fallbackStorage.getProducts(categoryId);
+    }
+  },
+
+  async getProduct(id: number): Promise<Product | undefined> {
+    try {
+      return await googleSheetsDb.getProductById(id);
+    } catch (error) {
+      console.log('Using fallback storage for product lookup');
+      return await fallbackStorage.getProductById(id);
+    }
+  },
+
+  async createProduct(product: InsertProduct): Promise<Product> {
+    try {
+      return await googleSheetsDb.createProduct(product);
+    } catch (error) {
+      console.log('Using fallback storage for product creation');
+      return await fallbackStorage.createProduct(product);
+    }
+  },
+
+  async updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product> {
+    try {
+      return await googleSheetsDb.updateProduct(id, product);
+    } catch (error) {
+      console.log('Using fallback storage for product update');
+      return await fallbackStorage.updateProduct(id, product);
+    }
+  },
+
+  async deleteProduct(id: number): Promise<void> {
+    try {
+      return await googleSheetsDb.deleteProduct(id);
+    } catch (error) {
+      console.log('Using fallback storage for product deletion');
+      return await fallbackStorage.deleteProduct(id);
+    }
+  },
+
+  async searchProducts(query: string): Promise<Product[]> {
+    try {
+      return await googleSheetsDb.searchProducts(query);
+    } catch (error) {
+      console.log('Using fallback storage for product search');
+      return await fallbackStorage.searchProducts(query);
+    }
+  },
+
+  // Cart operations
+  async getCartItems(userId: string): Promise<(CartItem & { product: Product })[]> {
+    try {
+      return await googleSheetsDb.getCartItems(userId);
+    } catch (error) {
+      console.log('Using fallback storage for cart items');
+      return await fallbackStorage.getCartItems(userId);
+    }
+  },
+
+  async addToCart(cartItem: InsertCartItem): Promise<CartItem> {
+    try {
+      return await googleSheetsDb.addToCart(cartItem);
+    } catch (error) {
+      console.log('Using fallback storage for cart addition');
+      return await fallbackStorage.addToCart(cartItem);
+    }
+  },
+
+  async updateCartItemQuantity(userId: string, productId: number, quantity: number): Promise<void> {
+    try {
+      return await googleSheetsDb.updateCartItemQuantity(userId, productId, quantity);
+    } catch (error) {
+      console.log('Using fallback storage for cart update');
+      return await fallbackStorage.updateCartItemQuantity(userId, productId, quantity);
+    }
+  },
+
+  async removeFromCart(userId: string, productId: number): Promise<void> {
+    try {
+      return await googleSheetsDb.removeFromCart(userId, productId);
+    } catch (error) {
+      console.log('Using fallback storage for cart removal');
+      return await fallbackStorage.removeFromCart(userId, productId);
+    }
+  },
+
+  async clearCart(userId: string): Promise<void> {
+    try {
+      return await googleSheetsDb.clearCart(userId);
+    } catch (error) {
+      console.log('Using fallback storage for cart clearing');
+      return await fallbackStorage.clearCart(userId);
+    }
+  },
+
+  // Order operations
+  async getOrders(): Promise<(Order & { user: User })[]> {
+    try {
+      return await googleSheetsDb.getOrders();
+    } catch (error) {
+      console.log('Using fallback storage for orders');
+      return await fallbackStorage.getOrders();
+    }
+  },
+
+  async getUserOrders(userId: string): Promise<Order[]> {
+    try {
+      return await googleSheetsDb.getUserOrders(userId);
+    } catch (error) {
+      console.log('Using fallback storage for user orders');
+      return await fallbackStorage.getUserOrders(userId);
+    }
+  },
+
+  async getOrder(id: number): Promise<(Order & { orderItems: Array<{ product: Product; quantity: number; price: string }> }) | undefined> {
+    try {
+      return await googleSheetsDb.getOrderById(id);
+    } catch (error) {
+      console.log('Using fallback storage for order lookup');
+      return await fallbackStorage.getOrderById(id);
+    }
+  },
+
+  async createOrder(order: InsertOrder, items: Array<{ productId: number; quantity: number; price: string }>): Promise<Order> {
+    try {
+      return await googleSheetsDb.createOrder(order, items);
+    } catch (error) {
+      console.log('Using fallback storage for order creation');
+      return await fallbackStorage.createOrder(order, items);
+    }
+  },
+
+  async updateOrderStatus(id: number, status: string): Promise<Order> {
+    try {
+      return await googleSheetsDb.updateOrderStatus(id, status);
+    } catch (error) {
+      console.log('Using fallback storage for order status update');
+      return await fallbackStorage.updateOrderStatus(id, status);
+    }
+  },
+};

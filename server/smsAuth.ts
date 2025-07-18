@@ -1,10 +1,8 @@
 import twilio from 'twilio';
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
-import connectPg from "connect-pg-simple";
-import { db } from "./db";
-import { otpVerifications, users } from "@shared/schema";
-import { eq, and, gt } from "drizzle-orm";
+import { googleSheetsDb } from "./googleSheetsDb";
+import { fallbackStorage } from "./fallbackStorage";
 import { nanoid } from "nanoid";
 
 // Initialize Twilio client
@@ -13,15 +11,79 @@ const twilioClient = twilio(
   process.env.TWILIO_AUTH_TOKEN!
 );
 
+// Custom session store for Google Sheets
+class GoogleSheetsSessionStore extends session.Store {
+  constructor() {
+    super();
+  }
+
+  get(sid: string, callback: (err: any, session?: any) => void) {
+    googleSheetsDb.getSession(sid)
+      .then(session => {
+        if (!session) {
+          callback(null, null);
+          return;
+        }
+        
+        // Check if session has expired
+        if (session.expire < new Date()) {
+          this.destroy(sid, callback);
+          return;
+        }
+        
+        callback(null, session.sess);
+      })
+      .catch(err => {
+        console.log('Using fallback storage for session get');
+        fallbackStorage.getSession(sid)
+          .then(session => {
+            if (!session) {
+              callback(null, null);
+              return;
+            }
+            
+            // Check if session has expired
+            if (session.expire < new Date()) {
+              this.destroy(sid, callback);
+              return;
+            }
+            
+            callback(null, session.sess);
+          })
+          .catch(fallbackErr => callback(fallbackErr));
+      });
+  }
+
+  set(sid: string, session: any, callback?: (err?: any) => void) {
+    const expire = new Date();
+    expire.setTime(expire.getTime() + (7 * 24 * 60 * 60 * 1000)); // 1 week
+    
+    googleSheetsDb.updateSession(sid, { sid, sess: session, expire })
+      .then(() => callback && callback())
+      .catch(err => {
+        console.log('Using fallback storage for session set');
+        fallbackStorage.updateSession(sid, { sid, sess: session, expire })
+          .then(() => callback && callback())
+          .catch(fallbackErr => callback && callback(fallbackErr));
+      });
+  }
+
+  destroy(sid: string, callback?: (err?: any) => void) {
+    googleSheetsDb.deleteSession(sid)
+      .then(() => callback && callback())
+      .catch(err => {
+        console.log('Using fallback storage for session destroy');
+        fallbackStorage.deleteSession(sid)
+          .then(() => callback && callback())
+          .catch(fallbackErr => callback && callback(fallbackErr));
+      });
+  }
+}
+
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-  const pgStore = connectPg(session);
-  const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
-    ttl: sessionTtl,
-    tableName: "sessions",
-  });
+  const sessionStore = new GoogleSheetsSessionStore();
+  
   return session({
     secret: process.env.SESSION_SECRET || "fallback-secret-key",
     store: sessionStore,
@@ -52,13 +114,23 @@ export async function sendOTP(phoneNumber: string): Promise<{ success: boolean; 
     const otp = generateOTP();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
-    // Store OTP in database
-    await db.insert(otpVerifications).values({
-      phoneNumber,
-      otp,
-      expiresAt,
-      verified: false,
-    });
+    // Store OTP in Google Sheets (with fallback)
+    try {
+      await googleSheetsDb.createOtpVerification({
+        phoneNumber,
+        otp,
+        expiresAt,
+        verified: false,
+      });
+    } catch (error) {
+      console.log('Using fallback storage for OTP creation');
+      await fallbackStorage.createOtpVerification({
+        phoneNumber,
+        otp,
+        expiresAt,
+        verified: false,
+      });
+    }
 
     // Send SMS via Twilio
     await twilioClient.messages.create({
@@ -77,47 +149,48 @@ export async function sendOTP(phoneNumber: string): Promise<{ success: boolean; 
 // Verify OTP and create user session
 export async function verifyOTP(phoneNumber: string, otp: string, req: any): Promise<{ success: boolean; message: string; user?: any }> {
   try {
-    // Find valid OTP
-    const [otpRecord] = await db
-      .select()
-      .from(otpVerifications)
-      .where(
-        and(
-          eq(otpVerifications.phoneNumber, phoneNumber),
-          eq(otpVerifications.otp, otp),
-          eq(otpVerifications.verified, false),
-          gt(otpVerifications.expiresAt, new Date())
-        )
-      )
-      .orderBy(otpVerifications.createdAt)
-      .limit(1);
+    // Find valid OTP (with fallback)
+    let otpRecord;
+    try {
+      otpRecord = await googleSheetsDb.getOtpVerification(phoneNumber, otp);
+    } catch (error) {
+      console.log('Using fallback storage for OTP verification');
+      otpRecord = await fallbackStorage.getOtpVerification(phoneNumber, otp);
+    }
 
     if (!otpRecord) {
       return { success: false, message: "Invalid or expired OTP" };
     }
 
-    // Mark OTP as verified
-    await db
-      .update(otpVerifications)
-      .set({ verified: true })
-      .where(eq(otpVerifications.id, otpRecord.id));
+    // Mark OTP as verified (with fallback)
+    try {
+      await googleSheetsDb.updateOtpVerification(otpRecord.id, { verified: true });
+    } catch (error) {
+      console.log('Using fallback storage for OTP update');
+      await fallbackStorage.updateOtpVerification(otpRecord.id, { verified: true });
+    }
 
-    // Find or create user
-    let [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.phoneNumber, phoneNumber));
-
-    if (!user) {
-      // Create new user
-      const userId = nanoid();
-      [user] = await db
-        .insert(users)
-        .values({
+    // Find or create user (with fallback)
+    let user;
+    try {
+      user = await googleSheetsDb.getUserByPhone(phoneNumber);
+      if (!user) {
+        const userId = nanoid();
+        user = await googleSheetsDb.createUser({
           id: userId,
           phoneNumber,
-        })
-        .returning();
+        });
+      }
+    } catch (error) {
+      console.log('Using fallback storage for user operations');
+      user = await fallbackStorage.getUserByPhone(phoneNumber);
+      if (!user) {
+        const userId = nanoid();
+        user = await fallbackStorage.createUser({
+          id: userId,
+          phoneNumber,
+        });
+      }
     }
 
     // Create session
@@ -137,11 +210,8 @@ export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
-  // Get user from database
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, req.session.userId));
+  // Get user from Google Sheets
+  const user = await googleSheetsDb.getUserById(req.session.userId);
 
   if (!user) {
     return res.status(401).json({ message: "User not found" });
