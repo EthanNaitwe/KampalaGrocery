@@ -90,7 +90,7 @@ async function getSheetData(sheetName: string): Promise<any[]> {
   } catch (error) {
     console.error(`Error getting data from sheet ${sheetName}:`, error);
     // If quota exceeded, throw error to trigger fallback
-    if (error.code === 429) {
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 429) {
       throw new Error('Google Sheets quota exceeded');
     }
     return [];
