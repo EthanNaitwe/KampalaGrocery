@@ -131,7 +131,8 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async getOrder(id: number): Promise<(Order & { orderItems: Array<{ product: Product; quantity: number; price: string }> }) | undefined> {
-    return await googleSheetsDb.getOrderById(id);
+    const order = await googleSheetsDb.getOrderById(id);
+    return order === null ? undefined : order;
   }
 
   async createOrder(order: InsertOrder, items: Array<{ productId: number; quantity: number; price: string }>): Promise<Order> {
@@ -263,7 +264,14 @@ export const storage = {
       return await googleSheetsDb.getCartItems(userId);
     } catch (error) {
       console.log('Using fallback storage for cart items');
-      return await fallbackStorage.getCartItems(userId);
+      const items = await fallbackStorage.getCartItems(userId);
+      // Filter out items where product is null and cast product to correct type
+      return items
+        .filter((item: any) => item.product !== null)
+        .map((item: any) => ({
+          ...item,
+          product: item.product as Product
+        }));
     }
   },
 
@@ -309,7 +317,9 @@ export const storage = {
       return await googleSheetsDb.getOrders();
     } catch (error) {
       console.log('Using fallback storage for orders');
-      return await fallbackStorage.getOrders();
+      // Filter out orders where user is null to match the expected type
+      const orders = await fallbackStorage.getOrders();
+      return orders.filter((order: any) => order.user !== null) as (Order & { user: User })[];
     }
   },
 
@@ -324,10 +334,25 @@ export const storage = {
 
   async getOrder(id: number): Promise<(Order & { orderItems: Array<{ product: Product; quantity: number; price: string }> }) | undefined> {
     try {
-      return await googleSheetsDb.getOrderById(id);
+      const order = await googleSheetsDb.getOrderById(id);
+      return order === null ? undefined : order;
     } catch (error) {
       console.log('Using fallback storage for order lookup');
-      return await fallbackStorage.getOrderById(id);
+      const order = await fallbackStorage.getOrderById(id);
+      if (order === null) return undefined;
+      // Filter out orderItems with null product and ensure correct types
+      return {
+        ...order,
+        orderItems: Array.isArray(order.orderItems)
+          ? order.orderItems
+              .filter((item: any) => item.product !== null)
+              .map((item: any) => ({
+                product: item.product as Product,
+                quantity: Number(item.quantity),
+                price: String(item.price),
+              }))
+          : [],
+      };
     }
   },
 
