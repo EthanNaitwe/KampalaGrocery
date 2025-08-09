@@ -9,7 +9,7 @@ import {
   type InsertOrder,
   type CartItem,
   type InsertCartItem,
-} from "@shared/schema";
+} from "../shared/schema.js";
 import { nanoid } from "nanoid";
 
 // In-memory storage with sample data as fallback

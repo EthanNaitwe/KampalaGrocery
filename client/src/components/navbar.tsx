@@ -16,7 +16,13 @@ interface NavbarProps {
 }
 
 export function Navbar({ onCartClick, showCart = true }: NavbarProps) {
-  const { user } = useAuth();
+  interface AuthUser {
+    firstName?: string;
+    phoneNumber?: string;
+    isAdmin?: boolean;
+    // add other properties if needed
+  }
+  const { user } = useAuth() as { user: AuthUser };
 
   const { data: cartItems = [] } = useQuery<CartItemWithProduct[]>({
     queryKey: ["/api/cart"],

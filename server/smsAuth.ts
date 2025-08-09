@@ -1,8 +1,8 @@
 import twilio from 'twilio';
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
-import { googleSheetsDb } from "./googleSheetsDb";
-import { fallbackStorage } from "./fallbackStorage";
+import { googleSheetsDb } from "./googleSheetsDb.js";
+import { fallbackStorage } from "./fallbackStorage.js";
 import { nanoid } from "nanoid";
 
 // Initialize Twilio client

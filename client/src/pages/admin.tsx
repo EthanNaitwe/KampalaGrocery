@@ -24,7 +24,10 @@ export default function Admin() {
 
   const updateOrderMutation = useMutation({
     mutationFn: async ({ orderId, status }: { orderId: number; status: string }) => {
-      return apiRequest("PUT", `/api/orders/${orderId}/status`, { status });
+      return apiRequest(`/api/orders/${orderId}/status`, {
+        method: "PUT",
+        body: { status },
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -196,7 +199,7 @@ export default function Admin() {
                           #{order.id.toString().padStart(4, '0')}
                         </TableCell>
                         <TableCell>
-                          {order.user?.firstName || order.user?.email || 'Unknown Customer'}
+                          {order.user?.firstName || 'Unknown Customer'}
                         </TableCell>
                         <TableCell>
                           {new Intl.NumberFormat('en-UG', {

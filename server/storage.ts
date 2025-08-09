@@ -9,9 +9,9 @@ import {
   type InsertOrder,
   type CartItem,
   type InsertCartItem,
-} from "@shared/schema";
-import { googleSheetsDb } from "./googleSheetsDb";
-import { fallbackStorage } from "./fallbackStorage";
+} from "../shared/schema.js";
+import { googleSheetsDb } from "./googleSheetsDb.js";
+import { fallbackStorage } from "./fallbackStorage.js";
 
 export interface IStorage {
   // User operations

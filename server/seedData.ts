@@ -1,5 +1,5 @@
-import { fallbackStorage } from "./fallbackStorage";
-import { googleSheetsDb } from "./googleSheetsDb";
+import { fallbackStorage } from "./fallbackStorage.js";
+import { googleSheetsDb } from "./googleSheetsDb.js";
 import { nanoid } from "nanoid";
 
 // Sample data for testing

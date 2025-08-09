@@ -9,16 +9,27 @@ import Home from "@/pages/home";
 import Admin from "@/pages/admin";
 import { useAuth } from "@/hooks/useAuth";
 
-function Router() {
-  const { isAuthenticated, isLoading, user } = useAuth();
+// Define or import the User type
+type User = {
+  isAdmin?: boolean;
+  // add other user properties if needed
+};
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+
+function Router() {
+  const { isAuthenticated, isLoading, user } = useAuth() as {
+    isAuthenticated: boolean;
+    isLoading: boolean;
+    user: User | null;
+  };
+
+  // if (isLoading) {
+  //   return (
+  //     <div className="min-h-screen flex items-center justify-center">
+  //       <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+  //     </div>
+  //   );
+  // }
 
   return (
     <Switch>

@@ -19,9 +19,12 @@ export function ProductCard({ product }: ProductCardProps) {
 
   const addToCartMutation = useMutation({
     mutationFn: async (productId: number) => {
-      return apiRequest("POST", "/api/cart", {
-        productId,
-        quantity: 1,
+      return apiRequest("/api/cart", {
+        method: "POST",
+        body: {
+          productId,
+          quantity: 1,
+        },
       });
     },
     onSuccess: () => {

@@ -26,7 +26,10 @@ export function ShoppingCart({ isOpen, onClose }: ShoppingCartProps) {
 
   const updateQuantityMutation = useMutation({
     mutationFn: async ({ productId, quantity }: { productId: number; quantity: number }) => {
-      return apiRequest("PUT", `/api/cart/${productId}`, { quantity });
+      return apiRequest(`/api/cart/${productId}`, {
+        method: "PUT",
+        body: { quantity },
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cart"] });
@@ -42,7 +45,7 @@ export function ShoppingCart({ isOpen, onClose }: ShoppingCartProps) {
 
   const removeItemMutation = useMutation({
     mutationFn: async (productId: number) => {
-      return apiRequest("DELETE", `/api/cart/${productId}`);
+      return apiRequest(`/api/cart/${productId}`, { method: "DELETE" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cart"] });
@@ -67,7 +70,10 @@ export function ShoppingCart({ isOpen, onClose }: ShoppingCartProps) {
       deliveryAddress: string;
       notes?: string;
     }) => {
-      return apiRequest("POST", "/api/orders", orderData);
+      return apiRequest("/api/orders", {
+        method: "POST",
+        body: orderData,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cart"] });

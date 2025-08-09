@@ -1,8 +1,19 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
-import { initializeSheets } from "./googleSheetsDb";
-import { seedDatabase } from "./seedData";
+import { registerRoutes } from "./routes.js";
+import { initializeSheets } from "./googleSheetsDb.js";
+// import { seedDatabase } from "./seedData.js";
+import path from "path";
+
+// Simple logging function for production
+const log = (message: string, source = "express") => {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+};
 
 const app = express();
 
@@ -41,41 +52,45 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
-  // Initialize Google Sheets
-  await initializeSheets();
-  
-  // Seed database with sample data
-  await seedDatabase();
-  
-  const server = await registerRoutes(app);
+let setupPromise: Promise<void> | null = null;
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
-  });
-
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
+async function setup() {
+  if (!setupPromise) {
+    setupPromise = (async () => {
+      await initializeSheets();
+      // await seedDatabase();
+      await registerRoutes(app);
+    })();
   }
+  await setupPromise;
+}
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  await setup();
+  next();
+});
+
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  const status = err.status || err.statusCode || 500;
+  const message = err.message || "Internal Server Error";
+  res.status(status).json({ message });
+});
+
+app.get("/api/health", (_req: Request, res: Response) => {
+  res.json({ status: "ok", message: "Backend is running!" });
+});
+
+// Serve static files in production
+if (process.env.NODE_ENV === "production") {
+  // Serve static files from the dist directory
+  app.use(express.static(path.join(process.cwd(), "dist")));
+  
+  // Handle client-side routing by serving index.html for non-API routes
+  app.get("*", (req: Request, res: Response) => {
+    if (!req.path.startsWith("/api")) {
+      res.sendFile(path.join(process.cwd(), "dist", "index.html"));
+    }
   });
-})();
+}
+
+export default app;
