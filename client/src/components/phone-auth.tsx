@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Loader2, Phone, Shield } from "lucide-react";
 
@@ -13,7 +15,18 @@ export default function PhoneAuth() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
+
+  // Redirect to home page when user becomes authenticated
+  useEffect(() => {
+    console.log("PhoneAuth useEffect: isAuthenticated changed to:", isAuthenticated);
+    if (isAuthenticated) {
+      console.log("PhoneAuth: User authenticated, redirecting to /");
+      setLocation("/");
+    }
+  }, [isAuthenticated, setLocation]);
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,18 +84,64 @@ export default function PhoneAuth() {
 
     setIsLoading(true);
     try {
-      await apiRequest("/api/auth/verify-otp", {
+      const response = await apiRequest("/api/auth/verify-otp", {
         method: "POST",
         body: { phoneNumber, otp },
       });
 
+      console.log("OTP verification response:", response);
+
       toast({
         title: "Success",
-        description: "Successfully signed in",
+        description: "Successfully signed in! Redirecting...",
       });
 
-      // Invalidate auth query to trigger re-fetch
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      // Force refetch the auth query to update the user state
+      console.log("Invalidating auth query...");
+      // await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      
+      // Also refetch the query immediately to get the updated user data
+      console.log("Refetching auth query...");
+      // await queryClient.refetchQueries({ queryKey: ["/api/auth/user"] });
+      
+      // Manual check to see if authentication worked
+      console.log("Manually checking authentication status...");
+      try {
+        console.log("Manually checking authentication status... 01");
+        const authCheck = await apiRequest("/api/auth/user", {
+          method: "GET",
+          // body: { phoneNumber, otp },
+        });
+        // const authCheck = await fetch("/api/auth/user", {
+        //   credentials: "include",
+        // });
+        console.log("Manual auth check status:", authCheck.status);
+        if (authCheck.ok) {
+          const userData = await authCheck.json();
+          console.log("Manual auth check user data:", userData);
+        }
+        
+        // Check what cookies are available
+        console.log("Available cookies:", document.cookie);
+        
+      } catch (error) {
+        console.error("Manual auth check error:", error);
+      }
+      
+      console.log("Auth query invalidated and refetched");
+      
+      // Force redirect after successful verification
+      console.log("Forcing redirect to home page...");
+      setTimeout(() => {
+        // Try to redirect first
+        setLocation("/");
+        
+        // If redirect doesn't work, force a page reload to ensure session is loaded
+        setTimeout(() => {
+          console.log("Forcing page reload to ensure session is loaded...");
+          window.location.reload();
+        }, 2000);
+      }, 1000);
     } catch (error: any) {
       console.error("Verify OTP error:", error);
       let errorMessage = "Invalid verification code";
