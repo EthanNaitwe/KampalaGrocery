@@ -4,6 +4,8 @@ import type {
   CartItemResponse,
   CategoryResponse,
   CreateAddressBody,
+  IssueResponse,
+  SupportInfo,
   OrderDetailResponse,
   OrderResponse,
   ProductResponse,
@@ -26,10 +28,12 @@ export const keys = {
   quote: (addressId: number) => ["quote", addressId] as const,
   orders: ["orders"] as const,
   order: (id: number) => ["order", id] as const,
+  orderIssues: (id: number) => ["orderIssues", id] as const,
+  support: ["support"] as const,
 };
 
 /** Keys holding per-user data; cleared on sign-out. */
-export const userScopedKeys = [keys.cart, keys.addresses, keys.orders, ["order"], ["quote"]];
+export const userScopedKeys = [keys.cart, keys.addresses, keys.orders, ["order"], ["quote"], ["orderIssues"]];
 
 export function useCategories() {
   return useQuery({ queryKey: keys.categories, queryFn: () => api<CategoryResponse[]>("/categories") });
@@ -189,5 +193,27 @@ export function useCancelOrder(id: number) {
       client.invalidateQueries({ queryKey: keys.orders });
       client.invalidateQueries({ queryKey: keys.slots });
     },
+  });
+}
+
+// ---- Support ------------------------------------------------------------------
+export function useSupportInfo() {
+  return useQuery({ queryKey: keys.support, queryFn: () => api<SupportInfo>("/support"), staleTime: 60 * 60_000 });
+}
+
+export function useOrderIssues(orderId: number) {
+  return useQuery({
+    queryKey: keys.orderIssues(orderId),
+    queryFn: () => authedApi<IssueResponse[]>(`/orders/${orderId}/issues`),
+    enabled: Number.isInteger(orderId) && orderId > 0,
+  });
+}
+
+export function useReportIssue(orderId: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { category: string; message: string }) =>
+      authedApi<IssueResponse>(`/orders/${orderId}/issues`, { method: "POST", body }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.orderIssues(orderId) }),
   });
 }

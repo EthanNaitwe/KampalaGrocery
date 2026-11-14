@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { EmptyState } from "@/components/States";
+import { SupportContacts } from "@/components/SupportContacts";
 import { Alert, ScrollView, Text } from "react-native";
 import type { UserResponse } from "@shared/api";
 import { Button, Field, styles } from "@/components/ui";
@@ -73,6 +74,7 @@ function AccountScreen() {
       <Field label="Last name" value={lastName} onChangeText={setLastName} autoComplete="family-name" error={error} />
       {!!message && <Text style={styles.body} accessibilityLiveRegion="polite">{message}</Text>}
       <Button title="Save" onPress={save} loading={saving} />
+      <SupportContacts />
       <Button title="Sign out" onPress={() => void signOut()} variant="secondary" />
       <Button title="Delete account" onPress={confirmDelete} variant="danger" />
     </ScrollView>

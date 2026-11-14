@@ -1,12 +1,13 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { customerCancellable, type OrderStatus } from "@shared/api";
+import { customerCancellable, issueCategoryLabels, type OrderStatus } from "@shared/api";
 import { ErrorState, Loading } from "@/components/States";
 import { Button, styles } from "@/components/ui";
 import { errorMessage } from "@/lib/errors";
 import { formatDateTime, formatSlotDate, statusLabel, statusSteps } from "@/lib/orders";
-import { useCancelOrder, useOrder } from "@/lib/queries";
+import { useCancelOrder, useOrder, useOrderIssues } from "@/lib/queries";
+import { SupportContacts } from "@/components/SupportContacts";
 import { colors, formatUGX, spacing } from "@/lib/theme";
 
 export default function OrderScreen() {
@@ -14,6 +15,8 @@ export default function OrderScreen() {
   const orderId = Number(id);
   const order = useOrder(orderId);
   const cancel = useCancelOrder(orderId);
+  const issues = useOrderIssues(orderId);
+  const router = useRouter();
 
   if (order.isLoading) return <Loading label="Loading order" />;
   if (!order.data) return <ErrorState error={order.error} onRetry={() => void order.refetch()} />;
@@ -92,9 +95,37 @@ export default function OrderScreen() {
           </Text>
         </View>
 
+        {!!issues.data?.length && (
+          <View style={s.card}>
+            <Text style={s.h}>Problems reported</Text>
+            {issues.data.map((i) => (
+              <View key={i.id} style={{ gap: 2 }}>
+                <Text style={{ color: colors.text, fontWeight: "600" }}>
+                  {issueCategoryLabels[i.category as keyof typeof issueCategoryLabels] ?? i.category} ·{" "}
+                  <Text style={{ color: i.status === "resolved" ? colors.primary : "#b45309" }}>
+                    {i.status === "resolved" ? "Resolved" : "We're on it"}
+                  </Text>
+                </Text>
+                <Text style={styles.body}>{i.message}</Text>
+                {!!i.resolution && <Text style={[styles.body, { color: colors.text }]}>Our reply: {i.resolution}</Text>}
+              </View>
+            ))}
+          </View>
+        )}
+
         {customerCancellable.includes(status) && (
           <Button title="Cancel order" variant="danger" onPress={confirmCancel} loading={cancel.isPending} />
         )}
+        {!cancelled && (
+          <Button
+            title="Report a problem"
+            variant="secondary"
+            onPress={() => router.push({ pathname: "/report", params: { orderId: String(o.id) } })}
+          />
+        )}
+        <View style={[s.card, { marginTop: spacing.sm }]}>
+          <SupportContacts />
+        </View>
       </ScrollView>
     </>
   );
