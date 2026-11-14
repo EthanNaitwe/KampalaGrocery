@@ -25,7 +25,24 @@ import {
   IDEMPOTENCY_HEADER,
   cancelOrderBody,
   adjustStockBody,
+  createIssueBody,
+  adminOrdersQuery,
+  adminOrderPatchBody,
+  zoneBody,
+  slotBody,
+  slotPatchBody,
+  resolveIssueBody,
+  type SupportInfo,
 } from "../shared/api.js";
+import { notifyOrder, resendNotification, templateForStatus } from "./notify.js";
+import {
+  summary, listOrders, orderDetail, assignRider, listAllZones, createZone, updateZone,
+  listAllSlots, createSlot, updateSlot, listIssues, resolveIssue,
+} from "./admin.js";
+import { db } from "./db.js";
+import { supportIssues } from "../shared/schema.js";
+import { desc, eq } from "drizzle-orm";
+import { z } from "zod";
 import { adjustStock, assertCartQuantity, listMovements } from "./inventory.js";
 import {
   listZones,
@@ -340,6 +357,7 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
       const key = parse(idempotencyKey, req.get(IDEMPOTENCY_HEADER));
       const body = parse(placeOrderBody, req.body);
       const { order, replayed } = await placeOrder(req.user, body, key);
+      if (!replayed) await notifyOrder(order, "order_placed");
       res.status(replayed ? 200 : 201).json(order);
     }));
   } else {
@@ -352,14 +370,77 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   r.post("/orders/:id/cancel", isAuthenticated, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     const body = parse(cancelOrderBody, req.body);
-    res.json(await cancelByCustomer(req.user, id, body?.reason));
+    const order = await cancelByCustomer(req.user, id, body?.reason);
+    await notifyOrder(order, "order_cancelled");
+    res.json(order);
   }));
 
   r.put("/orders/:id/status", isAuthenticated, requireAdmin, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     const { status, note } = parse(updateOrderStatusBody, req.body);
-    res.json(await changeStatusByAdmin(req.user, id, status, note));
+    const order = await changeStatusByAdmin(req.user, id, status, note);
+    await notifyOrder(order, templateForStatus[status]);
+    res.json(order);
   }));
+
+  // ---- Support (customers) ------------------------------------------------
+  r.get("/support", (_req, res) => {
+    const info: SupportInfo = {
+      phone: process.env.SUPPORT_PHONE || null,
+      whatsapp: process.env.SUPPORT_WHATSAPP || null,
+      email: process.env.SUPPORT_EMAIL || null,
+      hours: process.env.SUPPORT_HOURS || null,
+    };
+    res.json(info);
+  });
+
+  const ownOrder = async (req: any) => {
+    const { id } = parse(idParam, req.params);
+    const order = await storage.getOrder(id);
+    if (!order || order.userId !== req.user.id) throw new HttpError("NOT_FOUND", "Order not found");
+    return order;
+  };
+
+  r.post("/orders/:id/issues", isAuthenticated, handle(async (req, res) => {
+    const order = await ownOrder(req);
+    const body = parse(createIssueBody, req.body);
+    const [issue] = await db.insert(supportIssues).values({ ...body, orderId: order.id, userId: req.user.id }).returning();
+    res.status(201).json(issue);
+  }));
+
+  r.get("/orders/:id/issues", isAuthenticated, handle(async (req, res) => {
+    const order = await ownOrder(req);
+    res.json(await db.select().from(supportIssues).where(eq(supportIssues.orderId, order.id)).orderBy(desc(supportIssues.id)));
+  }));
+
+  // ---- Staff console --------------------------------------------------------
+  const admin = Router();
+  admin.use(isAuthenticated, requireAdmin);
+  admin.get("/summary", handle(async (_req, res) => res.json(await summary())));
+  admin.get("/orders", handle(async (req, res) => res.json(await listOrders(parse(adminOrdersQuery, req.query)))));
+  admin.get("/orders/:id", handle(async (req, res) => res.json(await orderDetail(parse(idParam, req.params).id))));
+  admin.patch("/orders/:id", handle(async (req, res) => {
+    const { assignedRider } = parse(adminOrderPatchBody, req.body);
+    res.json(await assignRider(parse(idParam, req.params).id, assignedRider || null, req.user));
+  }));
+  admin.post("/notifications/:id/resend", handle(async (req, res) => res.json(await resendNotification(parse(idParam, req.params).id))));
+  admin.get("/delivery/zones", handle(async (_req, res) => res.json(await listAllZones())));
+  admin.post("/delivery/zones", handle(async (req, res) => res.status(201).json(await createZone(parse(zoneBody, req.body)))));
+  admin.patch("/delivery/zones/:id", handle(async (req, res) =>
+    res.json(await updateZone(parse(idParam, req.params).id, parse(zoneBody.partial(), req.body)))));
+  admin.get("/delivery/slots", handle(async (_req, res) => res.json(await listAllSlots())));
+  admin.post("/delivery/slots", handle(async (req, res) => res.status(201).json(await createSlot(parse(slotBody, req.body)))));
+  admin.patch("/delivery/slots/:id", handle(async (req, res) =>
+    res.json(await updateSlot(parse(idParam, req.params).id, parse(slotPatchBody, req.body)))));
+  admin.get("/issues", handle(async (req, res) => {
+    const status = parse(z.object({ status: z.enum(["open", "resolved", "all"]).default("open") }), req.query).status;
+    res.json(await listIssues(status));
+  }));
+  admin.patch("/issues/:id", handle(async (req, res) => {
+    const body = parse(resolveIssueBody, req.body);
+    res.json(await resolveIssue(parse(idParam, req.params).id, body.status, body.resolution, req.user));
+  }));
+  r.use("/admin", admin);
 
   // Unknown API routes return JSON 404 instead of falling through to the SPA.
   r.use((_req, res) => sendError(res, "NOT_FOUND", "Route not found"));

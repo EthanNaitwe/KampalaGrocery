@@ -1,4 +1,3 @@
-import twilio from "twilio";
 import nodemailer from "nodemailer";
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
@@ -10,6 +9,7 @@ import { HttpError, sendError } from "./http.js";
 import { devLogOtp, isProduction, requireSecret } from "./config.js";
 import { issueCode, verifyCode, OTP_TTL_MS } from "./otp.js";
 import { verifyAccessToken } from "./tokens.js";
+import { sendSms, smsConfigured } from "./sms.js";
 import type { User } from "../shared/schema.js";
 
 // ---- Sessions (web) --------------------------------------------------------
@@ -51,9 +51,6 @@ export function normalizeAuthIdentifier(identifier: string): string {
 }
 
 // ---- Delivery --------------------------------------------------------------
-let twilioClient: ReturnType<typeof twilio> | null = null;
-const hasTwilio = () =>
-  !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_AUTH_TOKEN && !!process.env.TWILIO_PHONE_NUMBER;
 const hasSmtp = () => !!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS;
 
 let emailTransporter: ReturnType<typeof nodemailer.createTransport> | null = null;
@@ -71,7 +68,7 @@ const minutes = Math.round(OTP_TTL_MS / 60000);
 
 async function deliverCode(identifier: string, code: string) {
   const isEmail = identifier.includes("@");
-  const configured = isEmail ? hasSmtp() : hasTwilio();
+  const configured = isEmail ? hasSmtp() : smsConfigured();
 
   if (!configured) {
     if (devLogOtp) {
@@ -95,12 +92,7 @@ async function deliverCode(identifier: string, code: string) {
         html: `<p>Your FreshMart verification code is <strong>${code}</strong>. It expires in ${minutes} minutes.</p>`,
       });
     } else {
-      twilioClient ??= twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-      await twilioClient.messages.create({
-        body: `Your FreshMart verification code is ${code}. It expires in ${minutes} minutes.`,
-        from: process.env.TWILIO_PHONE_NUMBER!,
-        to: identifier,
-      });
+      await sendSms(identifier, `Your FreshMart verification code is ${code}. It expires in ${minutes} minutes.`);
     }
   } catch (error: any) {
     // Log provider failure without the code or full provider payload.

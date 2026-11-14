@@ -70,6 +70,9 @@ export async function placeOrder(
 /** Removes everything created by users whose phone starts with `prefix`. */
 export async function cleanupUsers(prefix: string) {
   const ids = (await pool.query("select id from users where phone_number like $1", [`${prefix}%`])).rows.map((r) => r.id);
+  const orderIds = "(select id from orders where user_id = any($1))";
+  await pool.query(`delete from notifications where user_id = any($1) or order_id in ${orderIds}`, [ids]);
+  await pool.query(`delete from support_issues where user_id = any($1) or resolved_by = any($1) or order_id in ${orderIds}`, [ids]);
   await pool.query("delete from order_events where order_id in (select id from orders where user_id = any($1))", [ids]);
   await pool.query("delete from order_events where actor_user_id = any($1)", [ids]);
   await pool.query(

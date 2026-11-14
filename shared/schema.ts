@@ -98,6 +98,46 @@ export const products = pgTable("products", {
   check("CK_products_stock_nonnegative", sql`${table.stockQuantity} is null or ${table.stockQuantity} >= 0`),
 ]);
 
+/**
+ * Outbound customer messages (SMS today). Every attempt is recorded so staff can see and
+ * resend failures; a provider outage never blocks an order update.
+ */
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  orderId: integer("order_id"),
+  channel: varchar("channel", { length: 10 }).notNull(), // sms
+  template: varchar("template", { length: 40 }).notNull(), // order_placed | order_confirmed | ...
+  recipient: varchar("recipient", { length: 200 }),
+  body: text("body").notNull(),
+  status: varchar("status", { length: 15 }).notNull(), // sent | failed | skipped
+  error: text("error"),
+  providerId: varchar("provider_id", { length: 100 }),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  sentAt: timestamp("sent_at"),
+}, (table) => [
+  index("IDX_notifications_order").on(table.orderId),
+  index("IDX_notifications_status").on(table.status, table.createdAt),
+]);
+
+/** Customer-reported problems, optionally tied to an order. */
+export const supportIssues = pgTable("support_issues", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  orderId: integer("order_id").references(() => orders.id),
+  category: varchar("category", { length: 30 }).notNull(),
+  message: text("message").notNull(),
+  status: varchar("status", { length: 15 }).notNull().default("open"), // open | resolved
+  resolution: text("resolution"),
+  resolvedBy: varchar("resolved_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+}, (table) => [
+  index("IDX_issues_status").on(table.status, table.createdAt),
+  index("IDX_issues_order").on(table.orderId),
+]);
+
 /** Append-only stock ledger: every change to stock_quantity, with reason and actor. */
 export const inventoryMovements = pgTable("inventory_movements", {
   id: serial("id").primaryKey(),
@@ -168,6 +208,8 @@ export const orders = pgTable("orders", {
   paymentMethod: varchar("payment_method", { length: 20 }),
   paymentStatus: varchar("payment_status", { length: 20 }),
   idempotencyKey: varchar("idempotency_key", { length: 64 }),
+  /** Rider (name/phone) assigned by staff for dispatch. */
+  assignedRider: varchar("assigned_rider", { length: 100 }),
   notes: text("notes"),
   cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -282,6 +324,8 @@ export type DeliverySlot = typeof deliverySlots.$inferSelect;
 export type Address = typeof addresses.$inferSelect;
 export type OrderEvent = typeof orderEvents.$inferSelect;
 export type InventoryMovement = typeof inventoryMovements.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
+export type SupportIssue = typeof supportIssues.$inferSelect;
 
 export type InsertCartItem = typeof cartItems.$inferInsert;
 export type CartItem = typeof cartItems.$inferSelect;

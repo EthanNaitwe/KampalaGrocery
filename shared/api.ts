@@ -5,7 +5,9 @@
  * All request bodies/params/queries are validated against these schemas on the server.
  */
 import { z } from "zod";
-import type { Category, Order, Product, User, CartItem, Address, DeliveryZone, OrderEvent } from "./schema.js";
+import type {
+  Category, Order, Product, User, CartItem, Address, DeliveryZone, DeliverySlot, OrderEvent, Notification, SupportIssue,
+} from "./schema.js";
 
 export const API_VERSION = "v1";
 
@@ -199,3 +201,94 @@ export interface QuoteResponse {
   /** Blocking problems; the order will be refused while any are present. */
   issues: Array<{ code: "EMPTY_CART" | "OUT_OF_STOCK" | "BELOW_MINIMUM" | "ZONE_UNAVAILABLE"; message: string }>;
 }
+
+// ---- Support ----------------------------------------------------------------
+export const issueCategories = ["missing_item", "wrong_item", "damaged", "late", "payment", "other"] as const;
+export const issueCategoryLabels: Record<(typeof issueCategories)[number], string> = {
+  missing_item: "Missing item",
+  wrong_item: "Wrong item",
+  damaged: "Damaged or poor quality",
+  late: "Late delivery",
+  payment: "Payment",
+  other: "Something else",
+};
+export const createIssueBody = z.object({
+  category: z.enum(issueCategories),
+  message: z.string().trim().min(5, "Tell us a little more").max(2000),
+});
+export interface SupportInfo {
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  hours: string | null;
+}
+export type IssueResponse = SupportIssue;
+
+// ---- Staff console ------------------------------------------------------------
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM (24h)");
+const moneyStr = z.union([z.string(), z.number()]).transform(String).pipe(z.string().regex(/^\d{1,8}(\.\d{1,2})?$/, "Invalid amount"));
+
+export const zoneBody = z.object({
+  name: z.string().trim().min(2).max(100),
+  fee: moneyStr,
+  minOrder: moneyStr.optional(),
+  active: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(1000).optional(),
+});
+export const slotBody = z
+  .object({
+    label: z.string().trim().min(2).max(50),
+    startTime: hhmm,
+    endTime: hhmm,
+    capacity: z.number().int().min(0).max(10_000),
+    cutoffMinutes: z.number().int().min(0).max(24 * 60).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((v) => v.endTime > v.startTime, { message: "End time must be after start time", path: ["endTime"] });
+export const slotPatchBody = z.object({
+  label: z.string().trim().min(2).max(50).optional(),
+  startTime: hhmm.optional(),
+  endTime: hhmm.optional(),
+  capacity: z.number().int().min(0).max(10_000).optional(),
+  cutoffMinutes: z.number().int().min(0).max(24 * 60).optional(),
+  active: z.boolean().optional(),
+});
+
+export const adminOrdersQuery = z.object({
+  /** "active" = not yet delivered or cancelled. */
+  status: z.union([z.enum(orderStatuses), z.literal("active"), z.literal("all")]).default("active"),
+  slotDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** Order number or customer phone digits. */
+  q: z.string().trim().max(50).optional().transform((v) => v || undefined),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export const adminOrderPatchBody = z.object({ assignedRider: z.string().trim().max(100).nullable() });
+export const resolveIssueBody = z.object({
+  status: z.enum(["open", "resolved"]),
+  resolution: z.string().trim().max(2000).optional(),
+});
+
+export interface AdminOrderRow extends Order {
+  itemCount: number;
+}
+export interface AdminOrdersResponse {
+  items: AdminOrderRow[];
+  total: number;
+  /** Counts per status across all orders (for queue tabs). */
+  counts: Record<string, number>;
+}
+export interface AdminOrderDetail extends OrderDetailResponse {
+  notifications: Notification[];
+  issues: SupportIssue[];
+}
+export interface AdminSummary {
+  awaiting: Record<"pending" | "confirmed" | "preparing" | "out_for_delivery", number>;
+  todaySlots: Array<SlotAvailability & { booked: number; capacity: number }>;
+  lowStock: Array<Pick<Product, "id" | "name" | "stockQuantity">>;
+  failedNotifications: number;
+  openIssues: number;
+  deliveredToday: { count: number; total: string };
+}
+export type AdminZone = DeliveryZone;
+export type AdminSlot = DeliverySlot;
