@@ -1,5 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CartItemResponse, CategoryResponse, ProductResponse } from "@shared/api";
+import type {
+  AddressResponse,
+  CartItemResponse,
+  CategoryResponse,
+  CreateAddressBody,
+  OrderDetailResponse,
+  OrderResponse,
+  ProductResponse,
+  QuoteResponse,
+  SlotAvailability,
+  ZoneResponse,
+} from "@shared/api";
 import { api } from "./api";
 import { useAuth } from "./auth";
 import { authedApi } from "./session";
@@ -9,7 +20,16 @@ export const keys = {
   products: (f: { categoryId?: number; search?: string }) => ["products", f] as const,
   product: (id: number) => ["product", id] as const,
   cart: ["cart"] as const,
+  zones: ["zones"] as const,
+  slots: ["slots"] as const,
+  addresses: ["addresses"] as const,
+  quote: (addressId: number) => ["quote", addressId] as const,
+  orders: ["orders"] as const,
+  order: (id: number) => ["order", id] as const,
 };
+
+/** Keys holding per-user data; cleared on sign-out. */
+export const userScopedKeys = [keys.cart, keys.addresses, keys.orders, ["order"], ["quote"]];
 
 export function useCategories() {
   return useQuery({ queryKey: keys.categories, queryFn: () => api<CategoryResponse[]>("/categories") });
@@ -104,4 +124,70 @@ export function useRemoveFromCart() {
     ({ productId }) => authedApi(`/cart/${productId}`, { method: "DELETE" }),
     (items, v) => items.filter((i) => i.productId !== v.productId),
   );
+}
+
+// ---- Checkout ---------------------------------------------------------------
+export function useZones() {
+  return useQuery({ queryKey: keys.zones, queryFn: () => api<ZoneResponse[]>("/delivery/zones"), staleTime: 10 * 60_000 });
+}
+
+export function useSlots() {
+  // Availability changes as others book; keep it fresh.
+  return useQuery({ queryKey: keys.slots, queryFn: () => api<SlotAvailability[]>("/delivery/slots"), staleTime: 30_000 });
+}
+
+export function useAddresses() {
+  const { status } = useAuth();
+  return useQuery({
+    queryKey: keys.addresses,
+    queryFn: () => authedApi<AddressResponse[]>("/addresses"),
+    enabled: status === "signedIn",
+  });
+}
+
+export function useCreateAddress() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateAddressBody) => authedApi<AddressResponse>("/addresses", { method: "POST", body }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.addresses }),
+  });
+}
+
+export function useQuote(addressId: number | undefined) {
+  const { data: cart } = useCart();
+  return useQuery({
+    // Re-quote whenever the cart contents change.
+    queryKey: [...keys.quote(addressId ?? 0), cart?.map((i) => `${i.productId}x${i.quantity}`).join(",")],
+    queryFn: () => authedApi<QuoteResponse>("/checkout/quote", { method: "POST", body: { addressId } }),
+    enabled: !!addressId,
+  });
+}
+
+export function useOrders() {
+  const { status } = useAuth();
+  return useQuery({
+    queryKey: keys.orders,
+    queryFn: () => authedApi<OrderResponse[]>("/orders"),
+    enabled: status === "signedIn",
+  });
+}
+
+export function useOrder(id: number) {
+  return useQuery({
+    queryKey: keys.order(id),
+    queryFn: () => authedApi<OrderDetailResponse>(`/orders/${id}`),
+    enabled: Number.isInteger(id) && id > 0,
+  });
+}
+
+export function useCancelOrder(id: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => authedApi<OrderResponse>(`/orders/${id}/cancel`, { method: "POST", body: {} }),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: keys.order(id) });
+      client.invalidateQueries({ queryKey: keys.orders });
+      client.invalidateQueries({ queryKey: keys.slots });
+    },
+  });
 }

@@ -6,7 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Loading } from "@/components/States";
 import { shouldRetry } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
-import { keys } from "@/lib/queries";
+import { userScopedKeys } from "@/lib/queries";
 import { colors } from "@/lib/theme";
 
 function RootStack() {
@@ -15,7 +15,7 @@ function RootStack() {
 
   // Drop per-user data when the session ends so the next user never sees it.
   useEffect(() => {
-    if (status === "signedOut") client.removeQueries({ queryKey: keys.cart });
+    if (status === "signedOut") userScopedKeys.forEach((queryKey) => client.removeQueries({ queryKey }));
   }, [status, client]);
 
   if (status === "loading") return <Loading />;
@@ -32,6 +32,12 @@ function RootStack() {
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="product/[id]" options={{ title: "" }} />
+      <Stack.Protected guard={signedIn}>
+        <Stack.Screen name="checkout" options={{ title: "Checkout" }} />
+        <Stack.Screen name="address/new" options={{ title: "New address", presentation: "modal" }} />
+        <Stack.Screen name="orders/index" options={{ title: "My orders" }} />
+        <Stack.Screen name="orders/[id]" options={{ title: "Order" }} />
+      </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="sign-in" options={{ title: "Sign in", presentation: "modal" }} />
         <Stack.Screen name="verify" options={{ title: "Verify" }} />

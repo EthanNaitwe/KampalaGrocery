@@ -25,6 +25,7 @@ export default function AccountTab() {
 }
 
 function AccountScreen() {
+  const router = useRouter();
   const { user, signOut, deleteAccount } = useAuth();
   const [firstName, setFirstName] = useState(user?.firstName ?? "");
   const [lastName, setLastName] = useState(user?.lastName ?? "");
@@ -67,6 +68,7 @@ function AccountScreen() {
   return (
     <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
       <Text style={styles.body}>Signed in as {user?.phoneNumber}</Text>
+      <Button title="My orders" variant="secondary" onPress={() => router.push("/orders")} />
       <Field label="First name" value={firstName} onChangeText={setFirstName} autoComplete="given-name" />
       <Field label="Last name" value={lastName} onChangeText={setLastName} autoComplete="family-name" error={error} />
       {!!message && <Text style={styles.body} accessibilityLiveRegion="polite">{message}</Text>}

@@ -84,8 +84,7 @@ export default function CartScreen() {
             <Text style={s.total}>{formatUGX(subtotal)}</Text>
           </View>
           <Text style={[styles.body, { fontSize: 13 }]}>Delivery fee and final total are confirmed at checkout.</Text>
-          {/* Checkout is implemented in Phase 4 (delivery details, fees, payment). */}
-          <Button title="Checkout (coming soon)" onPress={() => {}} disabled />
+          <Button title="Checkout" onPress={() => router.push("/checkout")} disabled={unavailable || update.isPending || remove.isPending} />
         </View>
       )}
     </View>
