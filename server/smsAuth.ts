@@ -5,6 +5,7 @@ import type { Express, RequestHandler } from "express";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "./db.js";
 import { storage } from "./storage.js";
+import { sendError } from "./http.js";
 import { nanoid } from "nanoid";
 
 // Initialize Twilio client
@@ -205,17 +206,8 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 
 // Middleware to check if user is authenticated
 export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
-  console.log('Session check:', {
-    sessionId: req.sessionID,
-    userId: req.session?.userId,
-    hasSession: !!req.session,
-    sessionData: req.session,
-    cookies: req.headers.cookie
-  });
-
   if (!req.session.userId) {
-    console.log('No userId in session, returning 401');
-    return res.status(401).json({ message: "Unauthorized" });
+    return sendError(res, "UNAUTHORIZED", "Unauthorized");
   }
 
   let user;
@@ -223,15 +215,13 @@ export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
     user = await withTimeout(storage.getUser(req.session.userId), 4000, 'User lookup');
   } catch (error) {
     console.error('User lookup failed:', error);
-    return res.status(503).json({ message: "Service temporarily unavailable" });
+    return sendError(res, "SERVICE_UNAVAILABLE", "Service temporarily unavailable");
   }
 
   if (!user) {
-    console.log('User not found in storage, returning 401');
-    return res.status(401).json({ message: "User not found" });
+    return sendError(res, "UNAUTHORIZED", "Unauthorized");
   }
 
-  console.log('User authenticated successfully:', user);
   req.user = user;
   next();
 };

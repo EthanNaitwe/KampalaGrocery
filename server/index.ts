@@ -1,6 +1,5 @@
 import "dotenv/config";
-import express, { type Request, Response, NextFunction } from "express";
-import { pool } from "./db.js";
+import express, { type Request, Response } from "express";
 import { registerRoutes } from "./routes.js";
 import { setupAuth } from "./smsAuth.js";
 import path from "path";
@@ -53,40 +52,12 @@ app.use((req, res, next) => {
   next();
 });
 
-let setupPromise: Promise<void> | null = null;
-
-export async function setup() {
-  if (!setupPromise) {
-    setupPromise = (async () => {
-      await registerRoutes(app);
-    })();
-  }
-  await setupPromise;
-}
-
-// Ensure session middleware is registered before handling requests
+// Session middleware must be registered before the API routes.
 setupAuth(app);
+registerRoutes(app);
 
-app.use(async (req: Request, res: Response, next: NextFunction) => {
-  await setup();
-  next();
-});
-
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  const status = err.status || err.statusCode || 500;
-  const message = err.message || "Internal Server Error";
-  res.status(status).json({ message });
-});
-
-app.get("/api/health", async (_req: Request, res: Response) => {
-  try {
-    await pool.query("select 1");
-    res.json({ status: "ok", database: "ok" });
-  } catch (err) {
-    console.error("Database health check failed:", err);
-    res.status(503).json({ status: "degraded", database: "unreachable" });
-  }
-});
+// Kept for server/dev.ts, which awaits setup before attaching Vite.
+export async function setup() {}
 
 // Serve static files in production
 if (process.env.NODE_ENV === "production") {
