@@ -10,6 +10,7 @@ import {
   decimal,
   boolean,
   uniqueIndex,
+  date,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -90,26 +91,91 @@ export const products = pgTable("products", {
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("IDX_products_category").on(table.categoryId)]);
 
+// ---- Delivery configuration (editable data, not code) ----------------------
+export const deliveryZones = pgTable("delivery_zones", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  fee: decimal("fee", { precision: 10, scale: 2 }).notNull(),
+  minOrder: decimal("min_order", { precision: 10, scale: 2 }).notNull().default("0"),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+/** Recurring daily delivery windows in Kampala time (UTC+3). */
+export const deliverySlots = pgTable("delivery_slots", {
+  id: serial("id").primaryKey(),
+  label: varchar("label", { length: 50 }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(), // "HH:MM"
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  capacity: integer("capacity").notNull(),
+  /** Orders close this many minutes before the window starts. */
+  cutoffMinutes: integer("cutoff_minutes").notNull().default(60),
+  active: boolean("active").notNull().default(true),
+});
+
+export const addresses = pgTable("addresses", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  label: varchar("label", { length: 50 }),
+  zoneId: integer("zone_id").references(() => deliveryZones.id).notNull(),
+  line: varchar("line", { length: 300 }).notNull(),
+  instructions: varchar("instructions", { length: 500 }),
+  contactPhone: varchar("contact_phone", { length: 20 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("IDX_addresses_user").on(table.userId)]);
+
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").references(() => users.id).notNull(),
   status: varchar("status", { length: 50 }).default("pending"),
+  /** subtotal + deliveryFee, computed by the server. */
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }),
+  deliveryFee: decimal("delivery_fee", { precision: 10, scale: 2 }),
   customerEmail: varchar("customer_email"),
   customerPhone: varchar("customer_phone"),
+  customerName: varchar("customer_name", { length: 200 }),
+  /** Snapshot of the address text at order time; later address edits don't rewrite it. */
   deliveryAddress: text("delivery_address"),
+  deliveryInstructions: text("delivery_instructions"),
+  deliveryZoneId: integer("delivery_zone_id").references(() => deliveryZones.id),
+  deliveryZoneName: varchar("delivery_zone_name", { length: 100 }),
+  slotId: integer("slot_id").references(() => deliverySlots.id),
+  slotDate: date("slot_date"),
+  slotLabel: varchar("slot_label", { length: 50 }),
+  paymentMethod: varchar("payment_method", { length: 20 }),
+  paymentStatus: varchar("payment_status", { length: 20 }),
+  idempotencyKey: varchar("idempotency_key", { length: 64 }),
   notes: text("notes"),
+  cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [index("IDX_orders_user").on(table.userId)]);
+}, (table) => [
+  index("IDX_orders_user").on(table.userId),
+  index("IDX_orders_slot").on(table.slotDate, table.slotId),
+  uniqueIndex("UQ_orders_user_idempotency").on(table.userId, table.idempotencyKey),
+]);
 
 export const orderItems = pgTable("order_items", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id").references(() => orders.id).notNull(),
   productId: integer("product_id").references(() => products.id).notNull(),
+  /** Name snapshot so receipts survive catalog renames. */
+  productName: varchar("product_name", { length: 200 }),
   quantity: integer("quantity").notNull(),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
 }, (table) => [index("IDX_order_items_order").on(table.orderId)]);
+
+/** Audit trail: every status change, who made it and when. */
+export const orderEvents = pgTable("order_events", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id).notNull(),
+  fromStatus: varchar("from_status", { length: 50 }),
+  toStatus: varchar("to_status", { length: 50 }).notNull(),
+  actorUserId: varchar("actor_user_id").references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("IDX_order_events_order").on(table.orderId)]);
 
 export const cartItems = pgTable("cart_items", {
   id: serial("id").primaryKey(),
@@ -188,6 +254,11 @@ export type Order = typeof orders.$inferSelect;
 
 export type InsertOrderItem = typeof orderItems.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
+
+export type DeliveryZone = typeof deliveryZones.$inferSelect;
+export type DeliverySlot = typeof deliverySlots.$inferSelect;
+export type Address = typeof addresses.$inferSelect;
+export type OrderEvent = typeof orderEvents.$inferSelect;
 
 export type InsertCartItem = typeof cartItems.$inferInsert;
 export type CartItem = typeof cartItems.$inferSelect;
