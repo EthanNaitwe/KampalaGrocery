@@ -19,3 +19,28 @@ jobs:
         run: npm run check
       - name: Build
         run: npm run build
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      # Root deps provide zod/drizzle types for the shared contracts imported by the app.
+      - run: npm ci
+        working-directory: .
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Bundle (Android)
+        run: npx expo export --platform android --output-dir /tmp/expo-out
+        env:
+          EXPO_PUBLIC_API_URL: https://ci.invalid
