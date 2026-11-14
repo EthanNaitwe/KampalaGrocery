@@ -2,7 +2,8 @@ import { Router, type Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.js";
 import { pool } from "./db.js";
-import { isAuthenticated, sendOTP, verifyOTP, logout } from "./smsAuth.js";
+import { isAuthenticated, sendOTP, verifyOTP, logout, startWebSession } from "./smsAuth.js";
+import { issueTokens, rotateRefreshToken, revokeRefreshToken } from "./tokens.js";
 import { insertProductSchema, insertCategorySchema, sendOtpSchema, verifyOtpSchema } from "../shared/schema.js";
 import {
   idParam,
@@ -12,6 +13,12 @@ import {
   updateCartItemBody,
   createOrderBody,
   updateOrderStatusBody,
+  requestCodeBody,
+  tokenRequestBody,
+  refreshBody,
+  logoutBody,
+  updateProfileBody,
+  type TokenResponse,
 } from "../shared/api.js";
 import { HttpError, errorMiddleware, handle, parse, requireAdmin, sendError } from "./http.js";
 
@@ -29,29 +36,77 @@ function buildApiRouter(): Router {
   }));
 
   // ---- Auth ---------------------------------------------------------------
-  const otpResult = (res: any, result: { success: boolean; message: string; user?: unknown }) => {
-    if (!result.success) return sendError(res, "VALIDATION_ERROR", result.message);
-    res.json(result.user ? { message: result.message, user: result.user } : { message: result.message });
-  };
+  // Codes are 6 digits, single-use, hashed at rest, attempt-limited and throttled (see otp.ts).
+  // Responses never reveal whether an account already exists.
+  const codeSent = { message: "Verification code sent" };
 
   r.post("/auth/send-otp", handle(async (req, res) => {
     const body = parse(sendOtpSchema, req.body);
-    otpResult(res, await sendOTP(body.email ?? body.phoneNumber!));
+    await sendOTP(body.email ?? body.phoneNumber!, req.ip);
+    res.json(codeSent);
   }));
 
   r.post("/auth/send-email-otp", handle(async (req, res) => {
     const body = parse(sendOtpSchema, { email: req.body?.email ?? req.body?.phoneNumber });
-    otpResult(res, await sendOTP(body.email!));
+    await sendOTP(body.email!, req.ip);
+    res.json(codeSent);
   }));
 
+  // Web: verify code and start a cookie session.
   r.post("/auth/verify-otp", handle(async (req, res) => {
     const body = parse(verifyOtpSchema, req.body);
-    otpResult(res, await verifyOTP(body.email ?? body.phoneNumber!, body.otp, req));
+    const user = await verifyOTP(body.email ?? body.phoneNumber!, body.otp);
+    await startWebSession(req, user);
+    res.json({ message: "Signed in", user });
   }));
 
   r.post("/auth/verify-email-otp", handle(async (req, res) => {
     const body = parse(verifyOtpSchema, { email: req.body?.email ?? req.body?.phoneNumber, otp: req.body?.otp });
-    otpResult(res, await verifyOTP(body.email!, body.otp, req));
+    const user = await verifyOTP(body.email!, body.otp);
+    await startWebSession(req, user);
+    res.json({ message: "Signed in", user });
+  }));
+
+  // Mobile: request a code (same throttles as web).
+  r.post("/auth/otp", handle(async (req, res) => {
+    const body = parse(requestCodeBody, req.body);
+    await sendOTP(body.email ?? body.phoneNumber!, req.ip);
+    res.json(codeSent);
+  }));
+
+  // Mobile: exchange a code for tokens.
+  r.post("/auth/token", handle(async (req, res) => {
+    const body = parse(tokenRequestBody, req.body);
+    const user = await verifyOTP(body.email ?? body.phoneNumber!, body.otp);
+    const tokens = await issueTokens(user.id, body.deviceName);
+    const response: TokenResponse = { ...tokens, user };
+    res.json(response);
+  }));
+
+  // Mobile: rotate refresh token.
+  r.post("/auth/refresh", handle(async (req, res) => {
+    const { refreshToken } = parse(refreshBody, req.body);
+    const { userId, tokens } = await rotateRefreshToken(refreshToken);
+    const user = await storage.getUser(userId);
+    if (!user || user.deletedAt) throw new HttpError("UNAUTHORIZED", "Session expired. Please sign in again.");
+    const response: TokenResponse = { ...tokens, user };
+    res.json(response);
+  }));
+
+  r.get("/auth/me", isAuthenticated, handle(async (req, res) => {
+    res.json(req.user);
+  }));
+
+  r.patch("/auth/me", isAuthenticated, handle(async (req, res) => {
+    const body = parse(updateProfileBody, req.body);
+    res.json(await storage.updateProfile(req.user.id, body));
+  }));
+
+  // Permanently erases personal data; orders are kept without personal identifiers on the user.
+  r.delete("/auth/account", isAuthenticated, handle(async (req, res) => {
+    await storage.deleteAccount(req.user.id);
+    await logout(req);
+    res.status(204).send();
   }));
 
   const googleRedirectUri = () =>
@@ -108,9 +163,7 @@ function buildApiRouter(): Router {
       lastName: info.family_name || "",
     });
 
-    req.session.userId = user.id;
-    req.session.phoneNumber = user.phoneNumber;
-    await new Promise<void>((resolve, reject) => req.session.save((err: any) => (err ? reject(err) : resolve())));
+    await startWebSession(req, user);
     res.redirect("/");
   }));
 
@@ -118,11 +171,14 @@ function buildApiRouter(): Router {
   r.get("/auth/user", handle(async (req, res) => {
     const userId = req.session?.userId;
     const user = userId ? await storage.getUser(userId) : undefined;
-    if (!user) return res.json({ message: "User not logged in" });
+    if (!user || user.deletedAt) return res.json({ message: "User not logged in" });
     res.json(user);
   }));
 
+  // Works for both clients: revokes the mobile refresh token (if given) and ends any web session.
   r.post("/auth/logout", handle(async (req, res) => {
+    const body = parse(logoutBody, req.body);
+    if (body?.refreshToken) await revokeRefreshToken(body.refreshToken);
     await logout(req);
     res.json({ message: "Logged out successfully" });
   }));

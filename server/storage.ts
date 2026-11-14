@@ -16,6 +16,8 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByPhone(phoneNumber: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
+  updateProfile(id: string, profile: { firstName?: string | null; lastName?: string | null }): Promise<User>;
+  deleteAccount(id: string): Promise<void>;
 
   // Category operations
   getCategories(): Promise<Category[]>;

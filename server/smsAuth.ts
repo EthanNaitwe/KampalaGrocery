@@ -1,236 +1,183 @@
-import twilio from 'twilio';
-import nodemailer from 'nodemailer';
+import twilio from "twilio";
+import nodemailer from "nodemailer";
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import connectPgSimple from "connect-pg-simple";
+import { nanoid } from "nanoid";
 import { pool } from "./db.js";
 import { storage } from "./storage.js";
-import { sendError } from "./http.js";
-import { nanoid } from "nanoid";
+import { HttpError, sendError } from "./http.js";
+import { devLogOtp, isProduction, requireSecret } from "./config.js";
+import { issueCode, verifyCode, OTP_TTL_MS } from "./otp.js";
+import { verifyAccessToken } from "./tokens.js";
+import type { User } from "../shared/schema.js";
 
-// Initialize Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!
-);
-
-const smtpConfig = {
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: process.env.SMTP_USER && process.env.SMTP_PASS
-    ? {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    }
-    : undefined,
-};
-
-export const emailTransporter = nodemailer.createTransport(smtpConfig);
-
+// ---- Sessions (web) --------------------------------------------------------
 export function getSession() {
-  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-
-  const sessionConfig = {
-    secret: process.env.SESSION_SECRET || "fallback-secret-key-kampala-grocery-2024",
+  return session({
+    secret: requireSecret("SESSION_SECRET"),
     store: new (connectPgSimple(session))({ pool: pool as any, tableName: "sessions", createTableIfMissing: false }),
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: false,
-      sameSite: "lax" as "lax",
-      maxAge: sessionTtl,
+      secure: isProduction,
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       path: "/",
     },
-  };
-
-  console.log('Session configuration:', {
-    nodeEnv: process.env.NODE_ENV,
-    secure: sessionConfig.cookie.secure,
-    sameSite: sessionConfig.cookie.sameSite,
-    maxAge: sessionConfig.cookie.maxAge,
-    store: 'memory'
   });
-
-  return session(sessionConfig);
 }
 
-export async function setupAuth(app: Express) {
+export function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
 }
 
+// ---- Identifiers -----------------------------------------------------------
 export function normalizePhoneNumber(phoneNumber: string): string {
   const cleaned = phoneNumber.trim().replace(/[\s()-]/g, "");
-
-  if (!/^\+?[0-9]+$/.test(cleaned)) {
-    throw new Error("Phone number contains invalid characters");
-  }
-
-  if (cleaned.startsWith("+")) {
-    return cleaned;
-  }
-
-  if (cleaned.startsWith("256")) {
-    return `+${cleaned}`;
-  }
-
-  if (cleaned.startsWith("0")) {
-    return `+256${cleaned.slice(1)}`;
-  }
-
+  if (!/^\+?[0-9]+$/.test(cleaned)) throw new HttpError("VALIDATION_ERROR", "Invalid phone number");
+  if (cleaned.startsWith("+")) return cleaned;
+  if (cleaned.startsWith("256")) return `+${cleaned}`;
+  if (cleaned.startsWith("0")) return `+256${cleaned.slice(1)}`;
   return `+${cleaned}`;
 }
 
 export function normalizeAuthIdentifier(identifier: string): string {
   const trimmed = identifier.trim();
-
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-    return trimmed.toLowerCase();
-  }
-
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return trimmed.toLowerCase();
   return normalizePhoneNumber(trimmed);
 }
 
-function generateOTP(): string {
-  return Math.floor(1000 + Math.random() * 9000).toString();
+// ---- Delivery --------------------------------------------------------------
+let twilioClient: ReturnType<typeof twilio> | null = null;
+const hasTwilio = () =>
+  !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_AUTH_TOKEN && !!process.env.TWILIO_PHONE_NUMBER;
+const hasSmtp = () => !!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS;
+
+let emailTransporter: ReturnType<typeof nodemailer.createTransport> | null = null;
+function getMailer() {
+  emailTransporter ??= nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: process.env.SMTP_SECURE === "true",
+    auth: { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
+  });
+  return emailTransporter;
 }
 
-export async function sendEmailOtp(email: string, otp: string) {
-  const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER || 'FreshMart <no-reply@freshmart.ug>';
+const minutes = Math.round(OTP_TTL_MS / 60000);
 
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    const message = 'SMTP email is not configured. Add SMTP_HOST, SMTP_USER, and SMTP_PASS to your .env file.';
-    console.error(message);
-    throw new Error(message);
+async function deliverCode(identifier: string, code: string) {
+  const isEmail = identifier.includes("@");
+  const configured = isEmail ? hasSmtp() : hasTwilio();
+
+  if (!configured) {
+    if (devLogOtp) {
+      console.log(`[dev] verification code for ${identifier}: ${code}`);
+      return;
+    }
+    // Never report success for a code nobody can receive.
+    throw new HttpError(
+      "SERVICE_UNAVAILABLE",
+      isEmail ? "Email sign-in is temporarily unavailable" : "SMS sign-in is temporarily unavailable",
+    );
   }
 
   try {
-    await emailTransporter.sendMail({
-      from: fromAddress,
-      to: email,
-      subject: 'Your FreshMart verification code',
-      text: `Your FreshMart verification code is ${otp}. It will expire in 10 minutes.`,
-      html: `<p>Your FreshMart verification code is <strong>${otp}</strong>. It will expire in 10 minutes.</p>`,
-    });
-  } catch (error: any) {
-    const message = error?.response || error?.message || 'SMTP email delivery failed.';
-    console.error('Email OTP send failed:', error);
-    throw new Error(message);
-  }
-}
-
-export async function sendOTP(identifier: string): Promise<{ success: boolean; message: string }> {
-  try {
-    const normalizedIdentifier = normalizeAuthIdentifier(identifier);
-    const otp = generateOTP();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    await storage.createOtpVerification({ phoneNumber: normalizedIdentifier, otp, expiresAt });
-
-    console.log('OTP:....', otp);
-
-    const isEmail = normalizedIdentifier.includes('@');
-    const hasTwilioConfig = !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_AUTH_TOKEN && !!process.env.TWILIO_PHONE_NUMBER;
-
     if (isEmail) {
-      await sendEmailOtp(normalizedIdentifier, otp);
-      return { success: true, message: 'Verification email sent successfully' };
+      await getMailer().sendMail({
+        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        to: identifier,
+        subject: "Your FreshMart verification code",
+        text: `Your FreshMart verification code is ${code}. It expires in ${minutes} minutes.`,
+        html: `<p>Your FreshMart verification code is <strong>${code}</strong>. It expires in ${minutes} minutes.</p>`,
+      });
+    } else {
+      twilioClient ??= twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+      await twilioClient.messages.create({
+        body: `Your FreshMart verification code is ${code}. It expires in ${minutes} minutes.`,
+        from: process.env.TWILIO_PHONE_NUMBER!,
+        to: identifier,
+      });
     }
-
-    if (!hasTwilioConfig || process.env.NODE_ENV !== 'production') {
-      console.log(`Development mode: OTP for ${normalizedIdentifier} is ${otp}`);
-      return { success: true, message: 'OTP sent successfully (development mode)' };
-    }
-
-    await twilioClient.messages.create({
-      body: `Your verification code is: ${otp}. This code will expire in 10 minutes.`,
-      from: process.env.TWILIO_PHONE_NUMBER!,
-      to: normalizedIdentifier,
-    });
-
-    return { success: true, message: 'OTP sent successfully' };
   } catch (error: any) {
-    console.error('Error sending OTP:', error);
-    return { success: false, message: error?.message || 'Failed to send OTP' };
+    // Log provider failure without the code or full provider payload.
+    console.error(`Verification code delivery failed (${isEmail ? "email" : "sms"}):`, error?.code ?? error?.message);
+    throw new HttpError("SERVICE_UNAVAILABLE", "Could not send the verification code. Please try again.");
   }
 }
 
-export async function verifyOTP(identifier: string, otp: string, req: any): Promise<{ success: boolean; message: string; user?: any }> {
-  try {
-    const normalizedIdentifier = normalizeAuthIdentifier(identifier);
-
-    const valid = await storage.consumeOtp(normalizedIdentifier, otp);
-    if (!valid) {
-      return { success: false, message: 'Invalid or expired OTP' };
-    }
-
-    let user = await storage.getUserByPhone(normalizedIdentifier);
-    if (!user) {
-      user = await storage.upsertUser({
-        id: nanoid(),
-        phoneNumber: normalizedIdentifier,
-        firstName: normalizedIdentifier.includes('@') ? normalizedIdentifier.split('@')[0] : undefined,
-      });
-    }
-
-    req.session.userId = user.id;
-    req.session.phoneNumber = user.phoneNumber;
-
-    await new Promise<void>((resolve, reject) => {
-      req.session.save((err: any) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    });
-
-    return { success: true, message: 'OTP verified successfully', user };
-  } catch (error) {
-    console.error('Error verifying OTP:', error);
-    return { success: false, message: 'Failed to verify OTP' };
-  }
+// ---- OTP flow ---------------------------------------------------------------
+export async function sendOTP(identifier: string, ip: string | undefined): Promise<void> {
+  const normalized = normalizeAuthIdentifier(identifier);
+  const code = await issueCode(normalized, ip);
+  await deliverCode(normalized, code);
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+/** Verifies the code and returns the (possibly new) user. Throws a generic error on failure. */
+export async function verifyOTP(identifier: string, code: string): Promise<User> {
+  const normalized = normalizeAuthIdentifier(identifier);
+  if (!(await verifyCode(normalized, code))) {
+    throw new HttpError("UNAUTHORIZED", "Invalid or expired code");
+  }
+  const existing = await storage.getUserByPhone(normalized);
+  if (existing) return existing;
+  return storage.upsertUser({
+    id: nanoid(),
+    phoneNumber: normalized,
+    firstName: normalized.includes("@") ? normalized.split("@")[0] : undefined,
+  });
+}
+
+/** Starts a web cookie session for the user (regenerates the session id to prevent fixation). */
+export async function startWebSession(req: any, user: User): Promise<void> {
+  await new Promise<void>((resolve, reject) => req.session.regenerate((err: any) => (err ? reject(err) : resolve())));
+  req.session.userId = user.id;
+  req.session.phoneNumber = user.phoneNumber;
+  await new Promise<void>((resolve, reject) => req.session.save((err: any) => (err ? reject(err) : resolve())));
+}
+
+// ---- Middleware -------------------------------------------------------------
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return Promise.race([
     promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-    }),
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs)),
   ]);
 }
 
-// Middleware to check if user is authenticated
+/** Accepts `Authorization: Bearer <access token>` (mobile) or a cookie session (web). */
 export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
-  if (!req.session.userId) {
-    return sendError(res, "UNAUTHORIZED", "Unauthorized");
-  }
+  const header = req.headers.authorization as string | undefined;
+  let userId: string | null | undefined;
 
-  let user;
+  if (header?.startsWith("Bearer ")) {
+    userId = verifyAccessToken(header.slice(7).trim());
+    if (!userId) return sendError(res, "UNAUTHORIZED", "Access token invalid or expired");
+    req.authMethod = "token";
+  } else {
+    userId = req.session?.userId;
+    req.authMethod = "session";
+  }
+  if (!userId) return sendError(res, "UNAUTHORIZED", "Unauthorized");
+
+  let user: User | undefined;
   try {
-    user = await withTimeout(storage.getUser(req.session.userId), 4000, 'User lookup');
+    user = await withTimeout(storage.getUser(userId), 4000);
   } catch (error) {
-    console.error('User lookup failed:', error);
+    console.error("User lookup failed:", (error as Error).message);
     return sendError(res, "SERVICE_UNAVAILABLE", "Service temporarily unavailable");
   }
-
-  if (!user) {
-    return sendError(res, "UNAUTHORIZED", "Unauthorized");
-  }
+  if (!user || user.deletedAt) return sendError(res, "UNAUTHORIZED", "Unauthorized");
 
   req.user = user;
   next();
 };
 
-// Logout function
 export function logout(req: any): Promise<void> {
   return new Promise((resolve) => {
-    req.session.destroy(() => {
-      resolve();
-    });
+    if (!req.session) return resolve();
+    req.session.destroy(() => resolve());
   });
 }

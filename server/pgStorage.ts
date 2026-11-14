@@ -9,6 +9,7 @@ import {
   orderItems,
   cartItems,
   otpVerifications,
+  refreshTokens,
   type User,
   type UpsertUser,
   type Category,
@@ -47,6 +48,28 @@ export class PostgresStorage implements IStorage {
       })
       .returning();
     return row;
+  }
+
+  async updateProfile(id: string, profile: { firstName?: string | null; lastName?: string | null }): Promise<User> {
+    const [row] = await db.update(users).set({ ...profile, updatedAt: new Date() }).where(eq(users.id, id)).returning();
+    if (!row) throw new Error("User not found");
+    return row;
+  }
+
+  /**
+   * Erases personal data while keeping order records (needed for accounting/refunds).
+   * The phone/email is replaced so it can be used to register a fresh account.
+   */
+  async deleteAccount(id: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.delete(cartItems).where(eq(cartItems.userId, id));
+      await tx.delete(refreshTokens).where(eq(refreshTokens.userId, id));
+      await tx
+        .update(users)
+        .set({ phoneNumber: `deleted:${id}`, firstName: null, lastName: null, deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(users.id, id));
+      await tx.execute(sql`delete from sessions where sess->>'userId' = ${id}`);
+    });
   }
 
   // Categories

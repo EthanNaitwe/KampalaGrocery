@@ -33,6 +33,41 @@ export const idParam = z.object({ id: z.coerce.number().int().positive() });
 export const productIdParam = z.object({ productId: z.coerce.number().int().positive() });
 export const quantity = z.number().int().min(1).max(99);
 
+// ---- Auth -----------------------------------------------------------------
+const identifier = {
+  phoneNumber: z.string().trim().min(7).max(20).optional(),
+  email: z.string().trim().email().max(200).optional(),
+};
+const hasIdentifier = (d: { phoneNumber?: string; email?: string }) => !!(d.phoneNumber || d.email);
+
+export const requestCodeBody = z
+  .object(identifier)
+  .refine(hasIdentifier, { message: "Provide a phone number or email", path: ["phoneNumber"] });
+
+/** Mobile sign-in: exchange a code for an access/refresh token pair. */
+export const tokenRequestBody = z
+  .object({
+    ...identifier,
+    otp: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
+    deviceName: z.string().trim().max(100).optional(),
+  })
+  .refine(hasIdentifier, { message: "Provide a phone number or email", path: ["phoneNumber"] });
+
+export const refreshBody = z.object({ refreshToken: z.string().min(20).max(200) });
+export const logoutBody = z.object({ refreshToken: z.string().min(20).max(200).optional() }).optional();
+export const updateProfileBody = z.object({
+  firstName: z.string().trim().max(100).nullable().optional(),
+  lastName: z.string().trim().max(100).nullable().optional(),
+});
+
+export interface TokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  /** Access token lifetime in seconds. */
+  expiresIn: number;
+  user: User;
+}
+
 // ---- Catalog --------------------------------------------------------------
 export const listProductsQuery = z.object({
   categoryId: z.coerce.number().int().positive().optional(),

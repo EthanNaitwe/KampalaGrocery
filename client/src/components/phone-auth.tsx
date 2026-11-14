@@ -81,10 +81,10 @@ export default function PhoneAuth({ hideAuthLogin }: { hideAuthLogin: () => void
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp.length !== 4) {
+    if (otp.length !== 6) {
       toast({
         title: "Error",
-        description: "Please enter the 4-digit verification code",
+        description: "Please enter the 6-digit verification code",
         variant: "destructive",
       });
       return;
@@ -245,7 +245,7 @@ export default function PhoneAuth({ hideAuthLogin }: { hideAuthLogin: () => void
                 />
               )}
               <p className="text-sm text-muted-foreground">
-                We'll send you a 4-digit verification code
+                We'll send you a 6-digit verification code
               </p>
             </div>
             <Button
@@ -291,7 +291,7 @@ export default function PhoneAuth({ hideAuthLogin }: { hideAuthLogin: () => void
           {authMethod === "phone" ? "Verify Your Phone" : "Verify Your Email"}
         </CardTitle>
         <CardDescription>
-          Enter the 4-digit code sent to {authMethod === "phone" ? phoneNumber : email}
+          Enter the 6-digit code sent to {authMethod === "phone" ? phoneNumber : email}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -300,7 +300,7 @@ export default function PhoneAuth({ hideAuthLogin }: { hideAuthLogin: () => void
             <Label htmlFor="otp" className="text-center block">Verification Code</Label>
             <div className="flex justify-center">
               <InputOTP
-                maxLength={4}
+                maxLength={6}
                 value={otp}
                 onChange={setOtp}
                 disabled={isLoading}
@@ -310,13 +310,15 @@ export default function PhoneAuth({ hideAuthLogin }: { hideAuthLogin: () => void
                   <InputOTPSlot index={1} />
                   <InputOTPSlot index={2} />
                   <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
                 </InputOTPGroup>
               </InputOTP>
             </div>
           </div>
 
           <div className="space-y-3">
-            <Button type="submit" className="w-full" disabled={isLoading || otp.length !== 4}>
+            <Button type="submit" className="w-full" disabled={isLoading || otp.length !== 6}>
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

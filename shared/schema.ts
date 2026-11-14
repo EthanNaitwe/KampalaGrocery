@@ -34,19 +34,42 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   isAdmin: boolean("is_admin").default(false),
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// OTP verification table for SMS authentication
+// OTP verification table. `otp` stores an HMAC-SHA256 hash of the code, never the code itself.
 export const otpVerifications = pgTable("otp_verifications", {
   id: serial("id").primaryKey(),
   phoneNumber: varchar("phone_number").notNull(),
-  otp: varchar("otp", { length: 4 }).notNull(),
+  otp: varchar("otp", { length: 64 }).notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   verified: boolean("verified").default(false),
+  attempts: integer("attempts").notNull().default(0),
+  ip: varchar("ip", { length: 64 }),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [
+  index("IDX_otp_identifier_created").on(table.phoneNumber, table.createdAt),
+  index("IDX_otp_ip_created").on(table.ip, table.createdAt),
+]);
+
+// Mobile refresh tokens. Only a SHA-256 hash is stored. Tokens rotate on every use;
+// all tokens from one sign-in share a familyId so reuse of an old token revokes the family.
+export const refreshTokens = pgTable("refresh_tokens", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  familyId: varchar("family_id", { length: 32 }).notNull(),
+  deviceName: varchar("device_name", { length: 100 }),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  replacedAt: timestamp("replaced_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("IDX_refresh_user").on(table.userId),
+  index("IDX_refresh_family").on(table.familyId),
+]);
 
 export const categories = pgTable("categories", {
   id: serial("id").primaryKey(),
@@ -152,6 +175,8 @@ export type User = typeof users.$inferSelect;
 export type InsertOtpVerification = typeof otpVerifications.$inferInsert;
 export type OtpVerification = typeof otpVerifications.$inferSelect;
 
+export type RefreshToken = typeof refreshTokens.$inferSelect;
+
 export type InsertCategory = typeof categories.$inferInsert;
 export type Category = typeof categories.$inferSelect;
 
@@ -217,7 +242,7 @@ export const sendOtpSchema = z.object({
 export const verifyOtpSchema = z.object({
   phoneNumber: z.string().optional(),
   email: z.string().optional(),
-  otp: z.string().length(4, "OTP must be 4 digits"),
+  otp: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
 }).refine((data) => {
   const identifier = data.phoneNumber ?? data.email;
 
