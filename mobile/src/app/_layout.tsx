@@ -1,33 +1,24 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Link, Stack } from "expo-router";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { useEffect, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { Loading } from "@/components/States";
 import { shouldRetry } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { keys } from "@/lib/queries";
 import { colors } from "@/lib/theme";
-
-function HeaderAction() {
-  const { status } = useAuth();
-  const signedIn = status === "signedIn";
-  return (
-    <Link href={signedIn ? "/account" : "/sign-in"} accessibilityRole="button">
-      <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 16 }}>{signedIn ? "Account" : "Sign in"}</Text>
-    </Link>
-  );
-}
 
 function RootStack() {
   const { status } = useAuth();
+  const client = useQueryClient();
 
-  if (status === "loading") {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={colors.primary} accessibilityLabel="Loading" />
-      </View>
-    );
-  }
+  // Drop per-user data when the session ends so the next user never sees it.
+  useEffect(() => {
+    if (status === "signedOut") client.removeQueries({ queryKey: keys.cart });
+  }, [status, client]);
+
+  if (status === "loading") return <Loading />;
 
   const signedIn = status === "signedIn";
   return (
@@ -36,16 +27,14 @@ function RootStack() {
         headerTintColor: colors.primary,
         headerTitleStyle: { color: colors.text },
         contentStyle: { backgroundColor: colors.background },
+        headerBackButtonDisplayMode: "minimal",
       }}
     >
-      {/* Catalog is public. */}
-      <Stack.Screen name="index" options={{ title: "FreshMart", headerRight: () => <HeaderAction /> }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="product/[id]" options={{ title: "" }} />
       <Stack.Protected guard={!signedIn}>
-        <Stack.Screen name="sign-in" options={{ title: "Sign in" }} />
+        <Stack.Screen name="sign-in" options={{ title: "Sign in", presentation: "modal" }} />
         <Stack.Screen name="verify" options={{ title: "Verify" }} />
-      </Stack.Protected>
-      <Stack.Protected guard={signedIn}>
-        <Stack.Screen name="account" options={{ title: "Account" }} />
       </Stack.Protected>
     </Stack>
   );

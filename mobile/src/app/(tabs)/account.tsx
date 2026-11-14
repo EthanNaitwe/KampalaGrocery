@@ -1,4 +1,6 @@
+import { useRouter } from "expo-router";
 import { useState } from "react";
+import { EmptyState } from "@/components/States";
 import { Alert, ScrollView, Text } from "react-native";
 import type { UserResponse } from "@shared/api";
 import { Button, Field, styles } from "@/components/ui";
@@ -7,7 +9,22 @@ import { errorMessage } from "@/lib/errors";
 import { authedApi, saveUser } from "@/lib/session";
 import { spacing } from "@/lib/theme";
 
-export default function AccountScreen() {
+export default function AccountTab() {
+  const { status } = useAuth();
+  const router = useRouter();
+  if (status !== "signedIn") {
+    return (
+      <EmptyState
+        title="Your FreshMart account"
+        body="Sign in with your phone number to save your cart and track orders."
+        action={<Button title="Sign in" onPress={() => router.push("/sign-in")} />}
+      />
+    );
+  }
+  return <AccountScreen />;
+}
+
+function AccountScreen() {
   const { user, signOut, deleteAccount } = useAuth();
   const [firstName, setFirstName] = useState(user?.firstName ?? "");
   const [lastName, setLastName] = useState(user?.lastName ?? "");
