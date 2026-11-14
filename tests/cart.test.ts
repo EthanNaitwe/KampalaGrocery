@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app } from "../server/index.js";
 import { pool } from "../server/db.js";
+import { addAddress, cleanupUsers, openSlot, placeOrder } from "./helpers.js";
 
 const V1 = "/api/v1";
 const PREFIX = "+2567991";
@@ -31,10 +32,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   logSpy.mockRestore();
-  const ids = (await pool.query("select id from users where phone_number like $1", [`${PREFIX}%`])).rows.map((r) => r.id);
-  await pool.query("delete from cart_items where user_id = any($1) or product_id = $2", [ids, outOfStockId]);
-  await pool.query("delete from users where id = any($1)", [ids]);
-  await pool.query("delete from otp_verifications where phone_number like $1", [`${PREFIX}%`]);
+  await pool.query("delete from cart_items where product_id = $1", [outOfStockId]);
+  await cleanupUsers(PREFIX);
   await pool.query("delete from products where id = $1", [outOfStockId]);
   await pool.end();
 });
@@ -89,7 +88,7 @@ describe("Cart", () => {
     await request(app).post(`${V1}/cart`).set(h).send({ productId, quantity: 1 }).expect(201);
     const userId = (await request(app).get(`${V1}/auth/me`).set(h)).body.id;
     await pool.query("insert into cart_items (user_id, product_id, quantity) values ($1, $2, 1)", [userId, outOfStockId]);
-    const res = await request(app).post(`${V1}/orders`).set(h).send({});
+    const res = await placeOrder(h, { addressId: await addAddress(h), ...(await openSlot()) });
     expect(res.status).toBe(409);
     expect(res.body.error.details.productIds).toEqual([outOfStockId]);
   });

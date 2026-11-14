@@ -19,10 +19,28 @@ import {
   logoutBody,
   updateProfileBody,
   type TokenResponse,
+  createAddressBody,
+  quoteBody,
+  placeOrderBody,
+  idempotencyKey,
+  IDEMPOTENCY_HEADER,
+  cancelOrderBody,
 } from "../shared/api.js";
+import {
+  listZones,
+  listSlotAvailability,
+  listAddresses,
+  createAddress,
+  deleteAddress,
+  quote,
+  placeOrder,
+  cancelByCustomer,
+  changeStatusByAdmin,
+  listOrderEvents,
+} from "./checkout.js";
 import { HttpError, errorMiddleware, handle, parse, requireAdmin, sendError } from "./http.js";
 
-function buildApiRouter(): Router {
+function buildApiRouter(version: "v1" | "legacy"): Router {
   const r = Router();
 
   r.get("/health", handle(async (_req, res) => {
@@ -255,6 +273,32 @@ function buildApiRouter(): Router {
     res.status(204).send();
   }));
 
+  // ---- Delivery & addresses -----------------------------------------------
+  r.get("/delivery/zones", handle(async (_req, res) => {
+    res.json(await listZones());
+  }));
+
+  r.get("/delivery/slots", handle(async (_req, res) => {
+    res.json(await listSlotAvailability());
+  }));
+
+  r.get("/addresses", isAuthenticated, handle(async (req, res) => {
+    res.json(await listAddresses(req.user.id));
+  }));
+
+  r.post("/addresses", isAuthenticated, handle(async (req, res) => {
+    res.status(201).json(await createAddress(req.user.id, parse(createAddressBody, req.body)));
+  }));
+
+  r.delete("/addresses/:id", isAuthenticated, handle(async (req, res) => {
+    await deleteAddress(req.user.id, parse(idParam, req.params).id);
+    res.status(204).send();
+  }));
+
+  r.post("/checkout/quote", isAuthenticated, handle(async (req, res) => {
+    res.json(await quote(req.user.id, parse(quoteBody, req.body).addressId));
+  }));
+
   // ---- Orders -------------------------------------------------------------
   r.get("/orders", isAuthenticated, handle(async (req, res) => {
     res.json(req.user.isAdmin ? await storage.getOrders() : await storage.getUserOrders(req.user.id));
@@ -267,34 +311,48 @@ function buildApiRouter(): Router {
     if (!order || (!req.user.isAdmin && order.userId !== req.user.id)) {
       throw new HttpError("NOT_FOUND", "Order not found");
     }
-    res.json(order);
+    res.json({ ...order, events: await listOrderEvents(id) });
   }));
 
-  r.post("/orders", isAuthenticated, handle(async (req, res) => {
-    const body = parse(createOrderBody, req.body);
-    const cartItems = await storage.getCartItems(req.user.id);
-    if (cartItems.length === 0) throw new HttpError("VALIDATION_ERROR", "Cart is empty");
-    const unavailable = cartItems.filter((i) => i.product.inStock === false);
-    if (unavailable.length) {
-      throw new HttpError("CONFLICT", "Some items are out of stock", {
-        productIds: unavailable.map((i) => i.productId),
-      });
-    }
+  if (version === "v1") {
+    r.post("/orders", isAuthenticated, handle(async (req, res) => {
+      const key = parse(idempotencyKey, req.get(IDEMPOTENCY_HEADER));
+      const body = parse(placeOrderBody, req.body);
+      const { order, replayed } = await placeOrder(req.user, body, key);
+      res.status(replayed ? 200 : 201).json(order);
+    }));
+  } else {
+    // Deprecated web checkout (no delivery zone/slot). Kept until the web storefront moves to v1.
+    r.post("/orders", isAuthenticated, handle(async (req, res) => {
+      const body = parse(createOrderBody, req.body);
+      const cartItems = await storage.getCartItems(req.user.id);
+      if (cartItems.length === 0) throw new HttpError("VALIDATION_ERROR", "Cart is empty");
+      const unavailable = cartItems.filter((i) => i.product.inStock === false);
+      if (unavailable.length) {
+        throw new HttpError("CONFLICT", "Some items are out of stock", {
+          productIds: unavailable.map((i) => i.productId),
+        });
+      }
+      const totalCents = cartItems.reduce((sum, i) => sum + Math.round(parseFloat(i.product.price) * 100) * i.quantity, 0);
+      const order = await storage.createOrder(
+        { ...body, userId: req.user.id, status: "pending", total: (totalCents / 100).toFixed(2), paymentMethod: "cod", paymentStatus: "unpaid" },
+        cartItems.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.product.price })),
+      );
+      await storage.clearCart(req.user.id);
+      res.status(201).json(order);
+    }));
+  }
 
-    // Prices and total come from the database, never from the client. Integer math avoids float drift.
-    const totalCents = cartItems.reduce((sum, i) => sum + Math.round(parseFloat(i.product.price) * 100) * i.quantity, 0);
-    const order = await storage.createOrder(
-      { ...body, userId: req.user.id, status: "pending", total: (totalCents / 100).toFixed(2) },
-      cartItems.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.product.price })),
-    );
-    res.status(201).json(order);
+  r.post("/orders/:id/cancel", isAuthenticated, handle(async (req, res) => {
+    const { id } = parse(idParam, req.params);
+    const body = parse(cancelOrderBody, req.body);
+    res.json(await cancelByCustomer(req.user, id, body?.reason));
   }));
 
   r.put("/orders/:id/status", isAuthenticated, requireAdmin, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
-    const { status } = parse(updateOrderStatusBody, req.body);
-    if (!(await storage.getOrder(id))) throw new HttpError("NOT_FOUND", "Order not found");
-    res.json(await storage.updateOrderStatus(id, status));
+    const { status, note } = parse(updateOrderStatusBody, req.body);
+    res.json(await changeStatusByAdmin(req.user, id, status, note));
   }));
 
   // Unknown API routes return JSON 404 instead of falling through to the SPA.
@@ -304,8 +362,7 @@ function buildApiRouter(): Router {
 }
 
 export function registerRoutes(app: Express): Server {
-  const api = buildApiRouter();
-  app.use("/api/v1", api); // versioned API (mobile)
-  app.use("/api", api); // legacy alias (web)
+  app.use("/api/v1", buildApiRouter("v1")); // versioned API (mobile)
+  app.use("/api", buildApiRouter("legacy")); // legacy alias (web)
   return createServer(app);
 }

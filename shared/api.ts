@@ -5,7 +5,7 @@
  * All request bodies/params/queries are validated against these schemas on the server.
  */
 import { z } from "zod";
-import type { Category, Order, Product, User, CartItem } from "./schema.js";
+import type { Category, Order, Product, User, CartItem, Address, DeliveryZone, OrderEvent } from "./schema.js";
 
 export const API_VERSION = "v1";
 
@@ -92,7 +92,53 @@ export const createOrderBody = z.object({
 export type CreateOrderBody = z.infer<typeof createOrderBody>;
 
 export const orderStatuses = ["pending", "confirmed", "preparing", "out_for_delivery", "delivered", "cancelled"] as const;
-export const updateOrderStatusBody = z.object({ status: z.enum(orderStatuses) });
+export type OrderStatus = (typeof orderStatuses)[number];
+
+/** Allowed status changes. Anything else is rejected by the server. */
+export const orderTransitions: Record<OrderStatus, OrderStatus[]> = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["preparing", "cancelled"],
+  preparing: ["out_for_delivery", "cancelled"],
+  out_for_delivery: ["delivered"],
+  delivered: [],
+  cancelled: [],
+};
+/** Statuses from which a customer may cancel their own order. */
+export const customerCancellable: OrderStatus[] = ["pending"];
+
+export const paymentMethods = ["cod"] as const;
+
+// ---- Delivery & checkout --------------------------------------------------
+export const createAddressBody = z.object({
+  label: z.string().trim().max(50).optional(),
+  zoneId: z.number().int().positive(),
+  line: z.string().trim().min(3, "Enter the street, building or landmark").max(300),
+  instructions: z.string().trim().max(500).optional(),
+  contactPhone: z.string().trim().regex(/^\+?[0-9\s()-]{7,20}$/, "Invalid phone number").optional(),
+});
+export type CreateAddressBody = z.infer<typeof createAddressBody>;
+
+export const quoteBody = z.object({ addressId: z.number().int().positive() });
+
+export const placeOrderBody = z.object({
+  addressId: z.number().int().positive(),
+  slotId: z.number().int().positive(),
+  slotDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
+  paymentMethod: z.enum(paymentMethods),
+  customerName: z.string().trim().max(200).optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+export type PlaceOrderBody = z.infer<typeof placeOrderBody>;
+
+/** Required on POST /api/v1/orders so retries and double taps never create a second order. */
+export const IDEMPOTENCY_HEADER = "Idempotency-Key";
+export const idempotencyKey = z.string({ required_error: "Idempotency-Key header is required" }).regex(/^[A-Za-z0-9_-]{8,64}$/, "Invalid Idempotency-Key");
+
+export const cancelOrderBody = z.object({ reason: z.string().trim().max(500).optional() }).optional();
+export const updateOrderStatusBody = z.object({
+  status: z.enum(orderStatuses),
+  note: z.string().trim().max(500).optional(),
+});
 
 // ---- Response types -------------------------------------------------------
 export type UserResponse = User;
@@ -102,4 +148,31 @@ export type CartItemResponse = CartItem & { product: Product };
 export type OrderResponse = Order;
 export type OrderDetailResponse = Order & {
   orderItems: Array<{ product: Product; quantity: number; price: string }>;
+  events?: Array<Pick<OrderEvent, "fromStatus" | "toStatus" | "note" | "createdAt">>;
 };
+
+export type ZoneResponse = Pick<DeliveryZone, "id" | "name" | "fee" | "minOrder">;
+export type AddressResponse = Address & { zoneName: string };
+
+export interface SlotAvailability {
+  slotId: number;
+  label: string;
+  /** Kampala local date, YYYY-MM-DD */
+  date: string;
+  startTime: string;
+  endTime: string;
+  remaining: number;
+  available: boolean;
+  /** Why it's unavailable, if it is. */
+  reason?: "full" | "closed";
+}
+
+export interface QuoteResponse {
+  subtotal: string;
+  deliveryFee: string;
+  total: string;
+  minOrder: string;
+  itemCount: number;
+  /** Blocking problems; the order will be refused while any are present. */
+  issues: Array<{ code: "EMPTY_CART" | "OUT_OF_STOCK" | "BELOW_MINIMUM" | "ZONE_UNAVAILABLE"; message: string }>;
+}

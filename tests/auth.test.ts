@@ -3,6 +3,7 @@ import request from "supertest";
 import { createHmac } from "crypto";
 import { app } from "../server/index.js";
 import { pool } from "../server/db.js";
+import { addAddress, cleanupUsers, openSlot, placeOrder } from "./helpers.js";
 
 const V1 = "/api/v1";
 const PREFIX = "+2567990";
@@ -40,14 +41,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   logSpy.mockRestore();
-  const ids = (
-    await pool.query("select id from users where phone_number like $1", [`${PREFIX}%`])
-  ).rows.map((r) => r.id);
-  await pool.query("delete from order_items where order_id in (select id from orders where user_id = any($1))", [ids]);
-  await pool.query("delete from orders where user_id = any($1)", [ids]);
-  await pool.query("delete from cart_items where user_id = any($1)", [ids]);
-  await pool.query("delete from users where id = any($1)", [ids]);
-  await pool.query("delete from otp_verifications where phone_number like $1", [`${PREFIX}%`]);
+  await cleanupUsers(PREFIX);
   await pool.end();
 });
 
@@ -198,7 +192,8 @@ describe("Authorization", () => {
     const a = await signIn();
     const b = await signIn();
     await request(app).post(`${V1}/cart`).set(bearer(a.accessToken)).send({ productId, quantity: 1 }).expect(201);
-    const order = await request(app).post(`${V1}/orders`).set(bearer(a.accessToken)).send({}).expect(201);
+    const order = await placeOrder(bearer(a.accessToken), { addressId: await addAddress(bearer(a.accessToken)), ...(await openSlot()) });
+    expect(order.status).toBe(201);
 
     expect((await request(app).get(`${V1}/orders/${order.body.id}`).set(bearer(a.accessToken))).status).toBe(200);
     expect((await request(app).get(`${V1}/orders/${order.body.id}`).set(bearer(b.accessToken))).status).toBe(404);
@@ -210,8 +205,16 @@ describe("Authorization", () => {
     const s = await signIn();
     await request(app).post(`${V1}/cart`).set(bearer(s.accessToken)).send({ productId, quantity: 2 }).expect(201);
     const { rows } = await pool.query("select price from products where id = $1", [productId]);
-    const order = await request(app).post(`${V1}/orders`).set(bearer(s.accessToken)).send({ total: "1.00" }).expect(201);
-    expect(Number(order.body.total)).toBe(Number(rows[0].price) * 2);
+    const addressId = await addAddress(bearer(s.accessToken));
+    const fee = (await pool.query("select fee from addresses a join delivery_zones z on z.id = a.zone_id where a.id = $1", [addressId])).rows[0].fee;
+    const order = await placeOrder(bearer(s.accessToken), {
+      addressId,
+      ...(await openSlot()),
+      extra: { total: "1.00", subtotal: "1.00", deliveryFee: "0" },
+    });
+    expect(order.status).toBe(201);
+    expect(Number(order.body.subtotal)).toBe(Number(rows[0].price) * 2);
+    expect(Number(order.body.total)).toBe(Number(rows[0].price) * 2 + Number(fee));
   });
 });
 
