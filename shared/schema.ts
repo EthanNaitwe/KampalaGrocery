@@ -9,6 +9,7 @@ import {
   integer,
   decimal,
   boolean,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -64,7 +65,7 @@ export const products = pgTable("products", {
   inStock: boolean("in_stock").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [index("IDX_products_category").on(table.categoryId)]);
 
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
@@ -77,7 +78,7 @@ export const orders = pgTable("orders", {
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [index("IDX_orders_user").on(table.userId)]);
 
 export const orderItems = pgTable("order_items", {
   id: serial("id").primaryKey(),
@@ -85,7 +86,7 @@ export const orderItems = pgTable("order_items", {
   productId: integer("product_id").references(() => products.id).notNull(),
   quantity: integer("quantity").notNull(),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-});
+}, (table) => [index("IDX_order_items_order").on(table.orderId)]);
 
 export const cartItems = pgTable("cart_items", {
   id: serial("id").primaryKey(),
@@ -93,7 +94,7 @@ export const cartItems = pgTable("cart_items", {
   productId: integer("product_id").references(() => products.id).notNull(),
   quantity: integer("quantity").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [uniqueIndex("UQ_cart_user_product").on(table.userId, table.productId)]);
 
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
