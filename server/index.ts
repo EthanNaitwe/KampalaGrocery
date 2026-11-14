@@ -1,10 +1,8 @@
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
-import { googleSheetsDb } from "./googleSheetsDb.js";
+import { pool } from "./db.js";
 import { registerRoutes } from "./routes.js";
 import { setupAuth } from "./smsAuth.js";
-import { initializeSheets } from "./googleSheetsDb.js";
-// import { seedDatabase } from "./seedData.js";
 import path from "path";
 
 // Simple logging function for production
@@ -60,8 +58,6 @@ let setupPromise: Promise<void> | null = null;
 export async function setup() {
   if (!setupPromise) {
     setupPromise = (async () => {
-      await initializeSheets();
-      // await seedDatabase();
       await registerRoutes(app);
     })();
   }
@@ -83,17 +79,13 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 app.get("/api/health", async (_req: Request, res: Response) => {
-  let sheetsAccessible = false;
   try {
-    await googleSheetsDb.getUsers();
-    sheetsAccessible = true;
+    await pool.query("select 1");
+    res.json({ status: "ok", database: "ok" });
   } catch (err) {
-    console.error('Google Sheets accessibility check failed:', err);
-    sheetsAccessible = false;
+    console.error("Database health check failed:", err);
+    res.status(503).json({ status: "degraded", database: "unreachable" });
   }
-
-  res.setHeader('X-Sheets-Accessible', sheetsAccessible ? 'true' : 'false');
-  res.json({ status: "ok", message: "Backend is running!", sheetsAccessible });
 });
 
 // Serve static files in production

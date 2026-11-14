@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "./db.js";
 import {
@@ -8,6 +8,7 @@ import {
   orders,
   orderItems,
   cartItems,
+  otpVerifications,
   type User,
   type UpsertUser,
   type Category,
@@ -178,6 +179,28 @@ export class PostgresStorage implements IStorage {
       }
       return created;
     });
+  }
+
+  // OTP
+  async createOtpVerification(data: { phoneNumber: string; otp: string; expiresAt: Date }): Promise<void> {
+    await db.insert(otpVerifications).values({ ...data, verified: false });
+  }
+
+  /** Atomically marks a matching, unexpired, unused OTP as used. Returns false if none matched. */
+  async consumeOtp(phoneNumber: string, otp: string): Promise<boolean> {
+    const rows = await db
+      .update(otpVerifications)
+      .set({ verified: true })
+      .where(
+        and(
+          eq(otpVerifications.phoneNumber, phoneNumber),
+          eq(otpVerifications.otp, otp),
+          eq(otpVerifications.verified, false),
+          gt(otpVerifications.expiresAt, new Date()),
+        ),
+      )
+      .returning({ id: otpVerifications.id });
+    return rows.length > 0;
   }
 
   async updateOrderStatus(id: number, status: string): Promise<Order> {

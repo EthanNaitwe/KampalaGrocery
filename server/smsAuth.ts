@@ -2,8 +2,9 @@ import twilio from 'twilio';
 import nodemailer from 'nodemailer';
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
-import { googleSheetsDb } from "./googleSheetsDb.js";
-import { fallbackStorage } from "./fallbackStorage.js";
+import connectPgSimple from "connect-pg-simple";
+import { pool } from "./db.js";
+import { storage } from "./storage.js";
 import { nanoid } from "nanoid";
 
 // Initialize Twilio client
@@ -31,7 +32,7 @@ export function getSession() {
 
   const sessionConfig = {
     secret: process.env.SESSION_SECRET || "fallback-secret-key-kampala-grocery-2024",
-    store: new session.MemoryStore(),
+    store: new (connectPgSimple(session))({ pool: pool as any, tableName: "sessions", createTableIfMissing: false }),
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -125,22 +126,7 @@ export async function sendOTP(identifier: string): Promise<{ success: boolean; m
     const otp = generateOTP();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    try {
-      await googleSheetsDb.createOtpVerification({
-        phoneNumber: normalizedIdentifier,
-        otp,
-        expiresAt,
-        verified: false,
-      });
-    } catch (error) {
-      console.log('Using fallback storage for OTP creation');
-      await fallbackStorage.createOtpVerification({
-        phoneNumber: normalizedIdentifier,
-        otp,
-        expiresAt,
-        verified: false,
-      });
-    }
+    await storage.createOtpVerification({ phoneNumber: normalizedIdentifier, otp, expiresAt });
 
     console.log('OTP:....', otp);
 
@@ -174,47 +160,18 @@ export async function verifyOTP(identifier: string, otp: string, req: any): Prom
   try {
     const normalizedIdentifier = normalizeAuthIdentifier(identifier);
 
-    let otpRecord;
-    try {
-      otpRecord = await googleSheetsDb.getOtpVerification(normalizedIdentifier, otp);
-    } catch (error) {
-      console.log('Using fallback storage for OTP verification');
-      otpRecord = await fallbackStorage.getOtpVerification(normalizedIdentifier, otp);
-    }
-
-    if (!otpRecord) {
+    const valid = await storage.consumeOtp(normalizedIdentifier, otp);
+    if (!valid) {
       return { success: false, message: 'Invalid or expired OTP' };
     }
 
-    try {
-      await googleSheetsDb.updateOtpVerification(otpRecord.id, { verified: true });
-    } catch (error) {
-      console.log('Using fallback storage for OTP update');
-      await fallbackStorage.updateOtpVerification(otpRecord.id, { verified: true });
-    }
-
-    let user;
-    try {
-      user = await googleSheetsDb.getUserByPhone(normalizedIdentifier);
-      if (!user) {
-        const userId = nanoid();
-        user = await googleSheetsDb.createUser({
-          id: userId,
-          phoneNumber: normalizedIdentifier,
-          firstName: normalizedIdentifier.includes('@') ? normalizedIdentifier.split('@')[0] : undefined,
-        });
-      }
-    } catch (error) {
-      console.log('Using fallback storage for user operations');
-      user = await fallbackStorage.getUserByPhone(normalizedIdentifier);
-      if (!user) {
-        const userId = nanoid();
-        user = await fallbackStorage.createUser({
-          id: userId,
-          phoneNumber: normalizedIdentifier,
-          firstName: normalizedIdentifier.includes('@') ? normalizedIdentifier.split('@')[0] : undefined,
-        });
-      }
+    let user = await storage.getUserByPhone(normalizedIdentifier);
+    if (!user) {
+      user = await storage.upsertUser({
+        id: nanoid(),
+        phoneNumber: normalizedIdentifier,
+        firstName: normalizedIdentifier.includes('@') ? normalizedIdentifier.split('@')[0] : undefined,
+      });
     }
 
     req.session.userId = user.id;
@@ -229,19 +186,6 @@ export async function verifyOTP(identifier: string, otp: string, req: any): Prom
         }
       });
     });
-
-    // Persist session to Google Sheets (and fallback) so session can be inspected/retrieved
-    try {
-      const expire = req.session.cookie?.expires ? new Date(req.session.cookie.expires) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      await googleSheetsDb.createSession({ sid: req.sessionID, sess: req.session, expire });
-    } catch (err) {
-      console.log('Persisting session to Google Sheets failed, using fallback storage', err);
-      try {
-        await fallbackStorage.createSession({ sid: req.sessionID, sess: req.session, expire: req.session.cookie?.expires ? new Date(req.session.cookie.expires) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
-      } catch (fallbackErr) {
-        console.error('Fallback session persistence failed:', fallbackErr);
-      }
-    }
 
     return { success: true, message: 'OTP verified successfully', user };
   } catch (error) {
@@ -276,23 +220,10 @@ export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
 
   let user;
   try {
-    user = await withTimeout(
-      googleSheetsDb.getUserById(req.session.userId),
-      4000,
-      'Google Sheets user lookup'
-    );
+    user = await withTimeout(storage.getUser(req.session.userId), 4000, 'User lookup');
   } catch (error) {
-    console.log('Google Sheets user lookup timed out or failed, using fallback storage for user authentication:', error);
-    try {
-      user = await withTimeout(
-        fallbackStorage.getUserById(req.session.userId),
-        2000,
-        'Fallback user lookup'
-      );
-    } catch (fallbackError) {
-      console.error('Fallback user lookup failed:', fallbackError);
-      user = undefined;
-    }
+    console.error('User lookup failed:', error);
+    return res.status(503).json({ message: "Service temporarily unavailable" });
   }
 
   if (!user) {
