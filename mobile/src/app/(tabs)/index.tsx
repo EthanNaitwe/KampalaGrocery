@@ -5,6 +5,7 @@ import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, Text
 import { ProductImage } from "@/components/ProductImage";
 import { EmptyState, ErrorState, Loading } from "@/components/States";
 import { useCategories, useProducts } from "@/lib/queries";
+import { stockLabel } from "@/lib/stock";
 import { colors, formatUGX, spacing } from "@/lib/theme";
 
 function useDebounced<T>(value: T, ms = 300) {
@@ -92,24 +93,27 @@ export default function ShopScreen() {
               body={search ? `We couldn't find "${search}". Try another word.` : "Check back soon."}
             />
           }
-          renderItem={({ item }) => (
+          renderItem={({ item }) => {
+            const stock = stockLabel(item);
+            return (
             <Link href={{ pathname: "/product/[id]", params: { id: String(item.id) } }} asChild>
               <Pressable
                 style={({ pressed }) => [s.card, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.name}, ${formatUGX(item.price)}${item.inStock === false ? ", out of stock" : ""}`}
+                accessibilityLabel={`${item.name}, ${formatUGX(item.price)}${stock ? `, ${stock.text}` : ""}`}
               >
                 <ProductImage uri={item.image} size={72} />
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={s.name} numberOfLines={2}>{item.name}</Text>
                   {!!item.description && <Text style={s.desc} numberOfLines={1}>{item.description}</Text>}
                   <Text style={s.price}>{formatUGX(item.price)}</Text>
-                  {item.inStock === false && <Text style={s.out}>Out of stock</Text>}
+                  {!!stock && <Text style={stock.out ? s.out : s.low}>{stock.text}</Text>}
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.muted} />
               </Pressable>
             </Link>
-          )}
+            );
+          }}
         />
       )}
     </View>
@@ -155,4 +159,5 @@ const s = StyleSheet.create({
   desc: { fontSize: 13, color: colors.muted },
   price: { marginTop: 2, color: colors.primary, fontWeight: "700" },
   out: { color: colors.danger, fontSize: 13, fontWeight: "600" },
+  low: { color: "#b45309", fontSize: 13, fontWeight: "600" },
 });

@@ -8,13 +8,17 @@ export function QuantityStepper({
   value,
   onChange,
   min = 1,
+  max = MAX_QTY,
   label,
 }: {
   value: number;
   onChange: (v: number) => void;
   min?: number;
+  /** Upper bound, e.g. units in stock. Capped at MAX_QTY. */
+  max?: number;
   label: string;
 }) {
+  const upper = Math.min(max, MAX_QTY);
   const btn = (icon: "remove" | "add", next: number, disabled: boolean, a11y: string) => (
     <Pressable
       onPress={() => onChange(next)}
@@ -32,7 +36,7 @@ export function QuantityStepper({
     <View style={s.row} accessibilityLabel={`${label} quantity ${value}`}>
       {btn("remove", value - 1, value <= min, `Decrease ${label}`)}
       <Text style={s.value}>{value}</Text>
-      {btn("add", value + 1, value >= MAX_QTY, `Increase ${label}`)}
+      {btn("add", value + 1, value >= upper, `Increase ${label}`)}
     </View>
   );
 }

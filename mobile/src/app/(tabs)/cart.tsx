@@ -8,6 +8,7 @@ import { Button, styles } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { cartSummary, useCart, useRemoveFromCart, useUpdateCartQuantity } from "@/lib/queries";
+import { sellableQuantity } from "@/lib/stock";
 import { colors, formatUGX, spacing } from "@/lib/theme";
 
 export default function CartScreen() {
@@ -31,7 +32,7 @@ export default function CartScreen() {
 
   const items = cart.data ?? [];
   const { count, subtotal } = cartSummary(items);
-  const unavailable = items.some((i) => i.product.inStock === false);
+  const unavailable = items.some((i) => sellableQuantity(i.product) < i.quantity);
   const mutationError = update.error ?? remove.error;
 
   return (
@@ -50,15 +51,22 @@ export default function CartScreen() {
             action={<Button title="Start shopping" onPress={() => router.navigate("/")} />}
           />
         }
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          const sellable = sellableQuantity(item.product);
+          return (
           <View style={s.row}>
             <ProductImage uri={item.product.image} size={60} />
             <View style={{ flex: 1, gap: spacing.xs }}>
               <Text style={s.name} numberOfLines={2}>{item.product.name}</Text>
               <Text style={s.price}>{formatUGX(Number(item.product.price) * item.quantity)}</Text>
-              {item.product.inStock === false && <Text style={s.out}>No longer available</Text>}
+              {sellable <= 0 ? (
+                <Text style={s.out}>No longer available</Text>
+              ) : sellable < item.quantity ? (
+                <Text style={s.out}>Only {sellable} left. Reduce the quantity to continue.</Text>
+              ) : null}
               <QuantityStepper
                 value={item.quantity}
+                max={Number.isFinite(sellable) ? Math.max(sellable, 1) : undefined}
                 label={item.product.name}
                 onChange={(quantity) => update.mutate({ productId: item.productId, quantity })}
               />
@@ -72,13 +80,14 @@ export default function CartScreen() {
               <Ionicons name="trash-outline" size={22} color={colors.danger} />
             </Pressable>
           </View>
-        )}
+          );
+        }}
       />
 
       {items.length > 0 && (
         <View style={s.footer}>
           {!!mutationError && <Text style={styles.error}>{errorMessage(mutationError)}</Text>}
-          {unavailable && <Text style={styles.error}>Remove unavailable items before checking out.</Text>}
+          {unavailable && <Text style={styles.error}>Remove unavailable items or reduce quantities before checking out.</Text>}
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
             <Text style={styles.body}>Subtotal · {count} items</Text>
             <Text style={s.total}>{formatUGX(subtotal)}</Text>

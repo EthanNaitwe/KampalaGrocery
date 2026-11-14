@@ -10,6 +10,7 @@ import { errorMessage } from "@/lib/errors";
 import { cartSummary, useAddToCart, useCart, useProduct } from "@/lib/queries";
 import { colors, formatUGX, spacing } from "@/lib/theme";
 import { MAX_QTY } from "@/components/QuantityStepper";
+import { sellableQuantity, stockLabel } from "@/lib/stock";
 
 export default function ProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -27,14 +28,18 @@ export default function ProductScreen() {
 
   const p = product.data;
   const inCart = cart.data?.find((i) => i.productId === p.id)?.quantity ?? 0;
-  const outOfStock = p.inStock === false;
-  const maxAddable = MAX_QTY - inCart;
+  const sellable = sellableQuantity(p);
+  const outOfStock = sellable <= 0;
+  const stock = stockLabel(p);
+  // Can't add more than what's in stock minus what's already in the cart.
+  const maxAddable = Math.max(0, Math.min(MAX_QTY, sellable) - inCart);
+  const shownQty = Math.max(1, Math.min(qty, maxAddable));
 
   const onAdd = () => {
     if (status !== "signedIn") return router.push("/sign-in");
     setFeedback(null);
     add.mutate(
-      { productId: p.id, quantity: Math.min(qty, maxAddable) },
+      { productId: p.id, quantity: shownQty },
       {
         onSuccess: () => {
           setFeedback({ ok: true, text: `Added to cart` });
@@ -52,18 +57,16 @@ export default function ProductScreen() {
         <ProductImage uri={p.image} size={280} style={{ alignSelf: "center", borderRadius: 16 }} />
         <Text style={styles.title} accessibilityRole="header">{p.name}</Text>
         <Text style={{ fontSize: 20, fontWeight: "700", color: colors.primary }}>{formatUGX(p.price)}</Text>
-        {outOfStock ? (
-          <Text style={{ color: colors.danger, fontWeight: "600" }}>Out of stock</Text>
-        ) : (
-          <Text style={{ color: colors.primary, fontWeight: "600" }}>In stock</Text>
-        )}
+        <Text style={{ color: outOfStock ? colors.danger : stock ? "#b45309" : colors.primary, fontWeight: "600" }}>
+          {stock?.text ?? "In stock"}
+        </Text>
         {!!p.description && <Text style={styles.body}>{p.description}</Text>}
 
         {!outOfStock && (
           <View style={{ gap: spacing.md, marginTop: spacing.sm }}>
             {status === "signedIn" && (
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                <QuantityStepper value={qty} onChange={setQty} label={p.name} />
+                <QuantityStepper value={shownQty} onChange={setQty} max={Math.max(1, maxAddable)} label={p.name} />
                 {inCart > 0 && <Text style={styles.body}>{inCart} in cart</Text>}
               </View>
             )}
@@ -73,6 +76,9 @@ export default function ProductScreen() {
               loading={add.isPending}
               disabled={status === "signedIn" && maxAddable <= 0}
             />
+            {status === "signedIn" && maxAddable <= 0 && inCart > 0 && (
+              <Text style={[styles.body, { textAlign: "center" }]}>You have all available stock in your cart.</Text>
+            )}
             {!!feedback && (
               <Text
                 accessibilityLiveRegion="polite"
