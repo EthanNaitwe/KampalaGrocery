@@ -28,6 +28,16 @@ import {
   type ZoneResponse,
 } from "../shared/api.js";
 import { HttpError } from "./http.js";
+import { deductForOrder, restockForOrder, sellableQuantity, shortageMessage, type Shortage } from "./inventory.js";
+
+function shortagesOf(cart: Array<{ productId: number; name: string; quantity: number; inStock: boolean | null; stockQuantity: number | null }>): Shortage[] {
+  return cart.flatMap((i) => {
+    const available = sellableQuantity(i);
+    return available < i.quantity
+      ? [{ productId: i.productId, name: i.name, requested: i.quantity, available: Number.isFinite(available) ? available : 0 }]
+      : [];
+  });
+}
 
 export const BOOKING_DAYS = 3; // today + 2
 const KAMPALA_OFFSET = "+03:00"; // East Africa Time, no DST
@@ -117,6 +127,7 @@ async function loadCart(x: Exec, userId: string) {
       name: products.name,
       price: products.price,
       inStock: products.inStock,
+      stockQuantity: products.stockQuantity,
     })
     .from(cartItems)
     .innerJoin(products, eq(cartItems.productId, products.id))
@@ -139,10 +150,8 @@ function price(cart: Awaited<ReturnType<typeof loadCart>>, zone: typeof delivery
   const fee = cents(zone.fee);
   const issues: QuoteResponse["issues"] = [];
   if (cart.length === 0) issues.push({ code: "EMPTY_CART", message: "Your cart is empty" });
-  const out = cart.filter((i) => i.inStock === false);
-  if (out.length) {
-    issues.push({ code: "OUT_OF_STOCK", message: `No longer available: ${out.map((i) => i.name).join(", ")}` });
-  }
+  const short = shortagesOf(cart);
+  if (short.length) issues.push({ code: "OUT_OF_STOCK", message: shortageMessage(short) });
   if (!zone.active) issues.push({ code: "ZONE_UNAVAILABLE", message: `We're not delivering to ${zone.name} right now` });
   if (cart.length && subtotal < cents(zone.minOrder)) {
     issues.push({ code: "BELOW_MINIMUM", message: `Minimum order for ${zone.name} is UGX ${Number(zone.minOrder).toLocaleString("en-US")}` });
@@ -214,7 +223,7 @@ export async function placeOrder(user: User, body: PlaceOrderBody, key: string):
         throw new HttpError(conflict ? "CONFLICT" : "VALIDATION_ERROR", q.issues[0].message, {
           issues: q.issues,
           ...(conflict?.code === "OUT_OF_STOCK" && {
-            productIds: cart.filter((i) => i.inStock === false).map((i) => i.productId),
+            productIds: shortagesOf(cart).map((s) => s.productId),
           }),
         });
       }
@@ -244,6 +253,8 @@ export async function placeOrder(user: User, body: PlaceOrderBody, key: string):
         })
         .returning();
 
+      // Locks product rows and re-checks stock; a shortage here rolls back the whole order.
+      await deductForOrder(tx, cart, created.id, user.id);
       await tx.insert(orderItems).values(
         cart.map((i) => ({ orderId: created.id, productId: i.productId, productName: i.name, quantity: i.quantity, price: i.price })),
       );
@@ -280,6 +291,7 @@ async function transition(orderId: number, actor: User, to: OrderStatus, guard: 
       .set({ status: to, paymentStatus, updatedAt: new Date(), ...(to === "cancelled" && { cancelledAt: new Date() }) })
       .where(eq(orders.id, orderId))
       .returning();
+    if (to === "cancelled") await restockForOrder(tx, orderId, actor.id);
     await tx.insert(orderEvents).values({ orderId, fromStatus: from, toStatus: to, actorUserId: actor.id, note: note ?? null });
     return updated;
   });

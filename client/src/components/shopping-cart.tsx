@@ -63,36 +63,6 @@ export function ShoppingCart({ isOpen, onClose }: ShoppingCartProps) {
     },
   });
 
-  const checkoutMutation = useMutation({
-    mutationFn: async (orderData: {
-      customerEmail: string;
-      customerPhone: string;
-      deliveryAddress: string;
-      notes?: string;
-    }) => {
-      return apiRequest("/api/orders", {
-        method: "POST",
-        body: orderData,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cart"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      onClose();
-      toast({
-        title: "Order placed successfully!",
-        description: "Your order has been received and is being processed",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to place order. Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
   const handleUpdateQuantity = (productId: number, currentQuantity: number, delta: number) => {
     const newQuantity = currentQuantity + delta;
     if (newQuantity >= 1) {
@@ -102,17 +72,6 @@ export function ShoppingCart({ isOpen, onClose }: ShoppingCartProps) {
 
   const handleRemoveItem = (productId: number) => {
     removeItemMutation.mutate(productId);
-  };
-
-  const handleCheckout = () => {
-    // For simplicity, using placeholder checkout data
-    // In a real app, you'd collect this info from a form
-    checkoutMutation.mutate({
-      customerEmail: "customer@example.com",
-      customerPhone: "+256700000000",
-      deliveryAddress: "Kampala, Uganda",
-      notes: "Please call when you arrive",
-    });
   };
 
   const formatPrice = (price: string) => {
@@ -230,13 +189,11 @@ export function ShoppingCart({ isOpen, onClose }: ShoppingCartProps) {
                   {formatPrice(totalAmount.toString())}
                 </span>
               </div>
-              <Button
-                className="w-full bg-primary hover:bg-primary/90 font-poppins font-semibold"
-                onClick={handleCheckout}
-                disabled={checkoutMutation.isPending}
-              >
-                {checkoutMutation.isPending ? "Processing..." : "Proceed to Checkout"}
-              </Button>
+              {/* Customers order only through the mobile app; the cart syncs with their account. */}
+              <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground text-center">
+                To check out, open the <span className="font-semibold text-foreground">FreshMart app</span> and
+                sign in with the same number. Your cart is already there.
+              </div>
             </div>
           )}
         </div>

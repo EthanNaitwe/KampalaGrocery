@@ -11,7 +11,6 @@ import {
   listProductsQuery,
   addToCartBody,
   updateCartItemBody,
-  createOrderBody,
   updateOrderStatusBody,
   requestCodeBody,
   tokenRequestBody,
@@ -25,7 +24,9 @@ import {
   idempotencyKey,
   IDEMPOTENCY_HEADER,
   cancelOrderBody,
+  adjustStockBody,
 } from "../shared/api.js";
+import { adjustStock, assertCartQuantity, listMovements } from "./inventory.js";
 import {
   listZones,
   listSlotAvailability,
@@ -39,6 +40,9 @@ import {
   listOrderEvents,
 } from "./checkout.js";
 import { HttpError, errorMiddleware, handle, parse, requireAdmin, sendError } from "./http.js";
+
+// Stock changes only through POST /products/:id/stock so every change is in the ledger.
+const productWriteSchema = insertProductSchema.omit({ stockQuantity: true });
 
 function buildApiRouter(version: "v1" | "legacy"): Router {
   const r = Router();
@@ -224,13 +228,13 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   }));
 
   r.post("/products", isAuthenticated, requireAdmin, handle(async (req, res) => {
-    const body = parse(insertProductSchema, req.body);
+    const body = parse(productWriteSchema, req.body);
     res.status(201).json(await storage.createProduct(body));
   }));
 
   r.put("/products/:id", isAuthenticated, requireAdmin, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
-    const body = parse(insertProductSchema.partial(), req.body);
+    const body = parse(productWriteSchema.partial(), req.body);
     if (!(await storage.getProduct(id))) throw new HttpError("NOT_FOUND", "Product not found");
     res.json(await storage.updateProduct(id, body));
   }));
@@ -242,6 +246,19 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.status(204).send();
   }));
 
+  // ---- Inventory (staff) -------------------------------------------------
+  r.post("/products/:id/stock", isAuthenticated, requireAdmin, handle(async (req, res) => {
+    const { id } = parse(idParam, req.params);
+    const body = parse(adjustStockBody, req.body);
+    const change = "set" in body ? { set: body.set } : { delta: body.delta };
+    res.json(await adjustStock(id, change, body.reason, req.user.id, body.note));
+  }));
+
+  r.get("/products/:id/stock-movements", isAuthenticated, requireAdmin, handle(async (req, res) => {
+    const { id } = parse(idParam, req.params);
+    res.json(await listMovements(id));
+  }));
+
   // ---- Cart ---------------------------------------------------------------
   r.get("/cart", isAuthenticated, handle(async (req, res) => {
     res.json(await storage.getCartItems(req.user.id));
@@ -251,13 +268,17 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     const body = parse(addToCartBody, req.body);
     const product = await storage.getProduct(body.productId);
     if (!product) throw new HttpError("NOT_FOUND", "Product not found");
-    if (product.inStock === false) throw new HttpError("CONFLICT", "Product is out of stock");
+    const inCart = (await storage.getCartItems(req.user.id)).find((i) => i.productId === body.productId)?.quantity ?? 0;
+    assertCartQuantity(product, Math.min(inCart + body.quantity, 99));
     res.status(201).json(await storage.addToCart({ ...body, userId: req.user.id }));
   }));
 
   r.put("/cart/:productId", isAuthenticated, handle(async (req, res) => {
     const { productId } = parse(productIdParam, req.params);
     const { quantity } = parse(updateCartItemBody, req.body);
+    const product = await storage.getProduct(productId);
+    if (!product) throw new HttpError("NOT_FOUND", "Product not found");
+    assertCartQuantity(product, quantity);
     await storage.updateCartItemQuantity(req.user.id, productId, quantity);
     res.status(204).send();
   }));
@@ -322,24 +343,9 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
       res.status(replayed ? 200 : 201).json(order);
     }));
   } else {
-    // Deprecated web checkout (no delivery zone/slot). Kept until the web storefront moves to v1.
-    r.post("/orders", isAuthenticated, handle(async (req, res) => {
-      const body = parse(createOrderBody, req.body);
-      const cartItems = await storage.getCartItems(req.user.id);
-      if (cartItems.length === 0) throw new HttpError("VALIDATION_ERROR", "Cart is empty");
-      const unavailable = cartItems.filter((i) => i.product.inStock === false);
-      if (unavailable.length) {
-        throw new HttpError("CONFLICT", "Some items are out of stock", {
-          productIds: unavailable.map((i) => i.productId),
-        });
-      }
-      const totalCents = cartItems.reduce((sum, i) => sum + Math.round(parseFloat(i.product.price) * 100) * i.quantity, 0);
-      const order = await storage.createOrder(
-        { ...body, userId: req.user.id, status: "pending", total: (totalCents / 100).toFixed(2), paymentMethod: "cod", paymentStatus: "unpaid" },
-        cartItems.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.product.price })),
-      );
-      await storage.clearCart(req.user.id);
-      res.status(201).json(order);
+    // Customers order only through the mobile app (v1). The web is for staff.
+    r.post("/orders", handle(async () => {
+      throw new HttpError("GONE", "Ordering is available in the FreshMart mobile app");
     }));
   }
 

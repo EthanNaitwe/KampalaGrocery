@@ -16,6 +16,7 @@ export const errorCodes = [
   "FORBIDDEN",
   "NOT_FOUND",
   "CONFLICT",
+  "GONE",
   "RATE_LIMITED",
   "SERVICE_UNAVAILABLE",
   "INTERNAL",
@@ -107,6 +108,28 @@ export const orderTransitions: Record<OrderStatus, OrderStatus[]> = {
 export const customerCancellable: OrderStatus[] = ["pending"];
 
 export const paymentMethods = ["cod"] as const;
+
+// ---- Inventory (staff) -----------------------------------------------------
+export const stockReasons = ["count", "restock", "adjustment"] as const;
+/** `set` = physical count (absolute). `delta` = delivery (+) or write-off (-). */
+export const adjustStockBody = z.union([
+  z.object({ set: z.number().int().min(0).max(1_000_000), reason: z.literal("count"), note: z.string().trim().max(500).optional() }),
+  z.object({
+    delta: z.number().int().min(-1_000_000).max(1_000_000).refine((v) => v !== 0, "Change can't be zero"),
+    reason: z.enum(["restock", "adjustment"]),
+    note: z.string().trim().max(500).optional(),
+  }),
+]);
+export type AdjustStockBody = z.infer<typeof adjustStockBody>;
+
+/** Customers see "Only N left" at or below this. */
+export const LOW_STOCK_THRESHOLD = 5;
+
+/** Units a customer may buy right now: 0 when switched off, Infinity when not counted yet. */
+export function sellableQuantity(p: { inStock: boolean | null; stockQuantity: number | null }): number {
+  if (p.inStock === false) return 0;
+  return p.stockQuantity ?? Number.POSITIVE_INFINITY;
+}
 
 // ---- Delivery & checkout --------------------------------------------------
 export const createAddressBody = z.object({

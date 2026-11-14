@@ -72,9 +72,17 @@ export async function cleanupUsers(prefix: string) {
   const ids = (await pool.query("select id from users where phone_number like $1", [`${prefix}%`])).rows.map((r) => r.id);
   await pool.query("delete from order_events where order_id in (select id from orders where user_id = any($1))", [ids]);
   await pool.query("delete from order_events where actor_user_id = any($1)", [ids]);
+  await pool.query(
+    "delete from inventory_movements where actor_user_id = any($1) or order_id in (select id from orders where user_id = any($1))",
+    [ids],
+  );
   await pool.query("delete from order_items where order_id in (select id from orders where user_id = any($1))", [ids]);
   await pool.query("delete from orders where user_id = any($1)", [ids]);
   await pool.query("delete from cart_items where user_id = any($1)", [ids]);
   await pool.query("delete from users where id = any($1)", [ids]); // addresses + refresh tokens cascade
   await pool.query("delete from otp_verifications where phone_number like $1", [`${prefix}%`]);
+}
+
+export async function makeAdmin(userId: string) {
+  await pool.query("update users set is_admin = true where id = $1", [userId]);
 }

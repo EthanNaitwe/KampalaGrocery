@@ -11,10 +11,11 @@ import {
   boolean,
   uniqueIndex,
   date,
+  check,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // Session storage table.
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
@@ -86,10 +87,31 @@ export const products = pgTable("products", {
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   image: varchar("image", { length: 500 }),
   categoryId: integer("category_id").references(() => categories.id),
+  /** Manual on/off switch (e.g. seasonal). Customers can buy only if this is true AND stock allows. */
   inStock: boolean("in_stock").default(true),
+  /** Units on hand. NULL = not counted yet (sellable without limit until staff enter a count). */
+  stockQuantity: integer("stock_quantity"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [index("IDX_products_category").on(table.categoryId)]);
+}, (table) => [
+  index("IDX_products_category").on(table.categoryId),
+  check("CK_products_stock_nonnegative", sql`${table.stockQuantity} is null or ${table.stockQuantity} >= 0`),
+]);
+
+/** Append-only stock ledger: every change to stock_quantity, with reason and actor. */
+export const inventoryMovements = pgTable("inventory_movements", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").references(() => products.id).notNull(),
+  /** Signed change in units (negative = out). */
+  delta: integer("delta").notNull(),
+  /** Stock after this movement. */
+  balance: integer("balance").notNull(),
+  reason: varchar("reason", { length: 30 }).notNull(), // order | order_cancelled | restock | adjustment | count
+  orderId: integer("order_id"),
+  actorUserId: varchar("actor_user_id").references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("IDX_inventory_product").on(table.productId, table.createdAt)]);
 
 // ---- Delivery configuration (editable data, not code) ----------------------
 export const deliveryZones = pgTable("delivery_zones", {
@@ -259,6 +281,7 @@ export type DeliveryZone = typeof deliveryZones.$inferSelect;
 export type DeliverySlot = typeof deliverySlots.$inferSelect;
 export type Address = typeof addresses.$inferSelect;
 export type OrderEvent = typeof orderEvents.$inferSelect;
+export type InventoryMovement = typeof inventoryMovements.$inferSelect;
 
 export type InsertCartItem = typeof cartItems.$inferInsert;
 export type CartItem = typeof cartItems.$inferSelect;
