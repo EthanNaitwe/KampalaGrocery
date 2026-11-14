@@ -30,18 +30,37 @@ export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
-  async ({ queryKey }) => {
-    const res = await fetch(queryKey[0] as string, {
-      credentials: "include",
-    });
+    async ({ queryKey }) => {
+      const res = await fetch(queryKey[0] as string, {
+        credentials: "include",
+      });
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
+      if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+        return null;
+      }
 
-    await throwIfResNotOk(res);
-    return await res.json();
-  };
+      // If the server returns a successful response but indicates unauthenticated in body,
+      // treat it as null for callers that expect `null` when not logged in.
+      const bodyText = await res.text();
+      let body: any = null;
+      try {
+        body = bodyText ? JSON.parse(bodyText) : null;
+      } catch (_) {
+        body = bodyText;
+      }
+
+      if (body && typeof body === 'object' && body.message === 'User not logged in') {
+        return null;
+      }
+
+      // If status is not ok, throw preserving original behavior
+      if (!res.ok) {
+        const text = bodyText || res.statusText;
+        throw new Error(`${res.status}: ${text}`);
+      }
+
+      return body;
+    };
 
 export const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 
 export function useAuth() {
   const { data: user, isLoading } = useQuery({
@@ -10,17 +9,28 @@ export function useAuth() {
         const response = await fetch("/api/auth/user", {
           credentials: "include",
         });
-        
         if (response.status === 401) {
           console.log("useAuth: User not authenticated (401)");
           return null;
         }
-        
+
+        const text = await response.text();
+        let userData: any = null;
+        try {
+          userData = text ? JSON.parse(text) : null;
+        } catch (err) {
+          userData = text;
+        }
+
+        if (userData && typeof userData === 'object' && userData.message === 'User not logged in') {
+          console.log('useAuth: Server reported user not logged in');
+          return null;
+        }
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
-        const userData = await response.json();
+
         console.log("useAuth: User data fetched:", userData);
         return userData;
       } catch (error: any) {

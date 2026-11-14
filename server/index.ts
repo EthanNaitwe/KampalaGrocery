@@ -1,5 +1,8 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import { googleSheetsDb } from "./googleSheetsDb.js";
 import { registerRoutes } from "./routes.js";
+import { setupAuth } from "./smsAuth.js";
 import { initializeSheets } from "./googleSheetsDb.js";
 // import { seedDatabase } from "./seedData.js";
 import path from "path";
@@ -54,7 +57,7 @@ app.use((req, res, next) => {
 
 let setupPromise: Promise<void> | null = null;
 
-async function setup() {
+export async function setup() {
   if (!setupPromise) {
     setupPromise = (async () => {
       await initializeSheets();
@@ -64,6 +67,9 @@ async function setup() {
   }
   await setupPromise;
 }
+
+// Ensure session middleware is registered before handling requests
+setupAuth(app);
 
 app.use(async (req: Request, res: Response, next: NextFunction) => {
   await setup();
@@ -76,15 +82,25 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   res.status(status).json({ message });
 });
 
-app.get("/api/health", (_req: Request, res: Response) => {
-  res.json({ status: "ok", message: "Backend is running!" });
+app.get("/api/health", async (_req: Request, res: Response) => {
+  let sheetsAccessible = false;
+  try {
+    await googleSheetsDb.getUsers();
+    sheetsAccessible = true;
+  } catch (err) {
+    console.error('Google Sheets accessibility check failed:', err);
+    sheetsAccessible = false;
+  }
+
+  res.setHeader('X-Sheets-Accessible', sheetsAccessible ? 'true' : 'false');
+  res.json({ status: "ok", message: "Backend is running!", sheetsAccessible });
 });
 
 // Serve static files in production
 if (process.env.NODE_ENV === "production") {
   // Serve static files from the dist directory
   app.use(express.static(path.join(process.cwd(), "dist")));
-  
+
   // Handle client-side routing by serving index.html for non-API routes
   app.get("*", (req: Request, res: Response) => {
     if (!req.path.startsWith("/api")) {

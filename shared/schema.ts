@@ -194,10 +194,42 @@ export const updateOrderStatusSchema = z.object({
 });
 
 export const sendOtpSchema = z.object({
-  phoneNumber: z.string().min(10, "Phone number must be at least 10 digits"),
+  phoneNumber: z.string().optional(),
+  email: z.string().optional(),
+}).refine((data) => {
+  const identifier = data.phoneNumber ?? data.email;
+
+  if (!identifier) {
+    return false;
+  }
+
+  if (data.email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier);
+  }
+
+  return /^\+?[0-9\s()-]{10,20}$/.test(identifier);
+}, {
+  message: "Provide a valid phone number or email address",
+  path: ["phoneNumber"],
 });
 
 export const verifyOtpSchema = z.object({
-  phoneNumber: z.string().min(10, "Phone number must be at least 10 digits"),
+  phoneNumber: z.string().optional(),
+  email: z.string().optional(),
   otp: z.string().length(4, "OTP must be 4 digits"),
+}).refine((data) => {
+  const identifier = data.phoneNumber ?? data.email;
+
+  if (!identifier) {
+    return false;
+  }
+
+  if (data.email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier);
+  }
+
+  return /^\+?[0-9\s()-]{10,20}$/.test(identifier);
+}, {
+  message: "Provide a valid phone number or email address",
+  path: ["phoneNumber"],
 });

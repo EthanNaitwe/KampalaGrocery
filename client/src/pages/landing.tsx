@@ -1,20 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ShoppingBasket, Truck, Clock, Shield } from "lucide-react";
 import PhoneAuth from "@/components/phone-auth";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Landing() {
   const [showAuth, setShowAuth] = useState(false);
+  const { isAuthenticated, user } = useAuth();
 
-  const handleLogin = () => {
+  useEffect(() => {
+    if (isAuthenticated) {
+      setShowAuth(false);
+    }
+  }, [isAuthenticated]);
+
+  const showAuthLogin = () => {
     setShowAuth(true);
   };
 
-  if (showAuth) {
+  const hideAuthLogin = () => {
+    setShowAuth(false);
+  };
+
+  if (showAuth && !isAuthenticated) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <PhoneAuth />
+        <PhoneAuth hideAuthLogin={hideAuthLogin} />
       </div>
     );
   }
@@ -31,9 +43,15 @@ export default function Landing() {
                 FreshMart
               </h1>
             </div>
-            <Button onClick={handleLogin} className="bg-primary hover:bg-primary/90">
-              Sign In
-            </Button>
+            {isAuthenticated ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">Hi, {user?.firstName || user?.name || user?.phoneNumber}</span>
+              </div>
+            ) : (
+              <Button onClick={showAuthLogin} className="bg-primary hover:bg-primary/90">
+                Sign In
+              </Button>
+            )}
           </div>
         </div>
       </header>
@@ -49,8 +67,8 @@ export default function Landing() {
               <p className="text-xl mb-8 opacity-90">
                 Quality produce from Kampala's finest markets, delivered fresh daily to your neighborhood.
               </p>
-              <Button 
-                onClick={handleLogin}
+              <Button
+                onClick={showAuthLogin}
                 size="lg"
                 className="bg-secondary hover:bg-secondary/90 text-white px-8 py-4 text-lg font-poppins font-semibold"
               >
@@ -141,8 +159,8 @@ export default function Landing() {
           <p className="text-lg text-muted-foreground mb-8">
             Join thousands of satisfied customers who trust FreshMart for their daily grocery needs.
           </p>
-          <Button 
-            onClick={handleLogin}
+          <Button
+            onClick={showAuthLogin}
             size="lg"
             className="bg-primary hover:bg-primary/90 px-8 py-4 text-lg font-poppins font-semibold"
           >
