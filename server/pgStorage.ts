@@ -142,7 +142,8 @@ export class PostgresStorage implements IStorage {
       .values(cartItem)
       .onConflictDoUpdate({
         target: [cartItems.userId, cartItems.productId],
-        set: { quantity: sql`${cartItems.quantity} + excluded.quantity` },
+        // Same cap as the API contract (shared/api.ts quantity max).
+        set: { quantity: sql`least(${cartItems.quantity} + excluded.quantity, 99)` },
       })
       .returning();
     return row;
