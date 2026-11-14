@@ -14,16 +14,28 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown; timeoutMs?: number };
+export type RequestOptions = {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: unknown;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+};
 
-export async function api<T>(path: string, { method = "GET", body, timeoutMs = 15000 }: RequestOptions = {}): Promise<T> {
+export async function api<T>(
+  path: string,
+  { method = "GET", body, headers, timeoutMs = 15000 }: RequestOptions = {},
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       method,
-      headers: { Accept: "application/json", ...(body !== undefined && { "Content-Type": "application/json" }) },
+      headers: {
+        Accept: "application/json",
+        ...(body !== undefined && { "Content-Type": "application/json" }),
+        ...headers,
+      },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
