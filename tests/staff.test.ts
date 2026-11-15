@@ -12,7 +12,7 @@ vi.mock("../server/sms.js", () => ({
   },
 }));
 
-import { V1, addAddress, agreeTransport, app, cleanupUsers, makeAdmin, openSlot, phones, placeOrder, pool, request } from "./helpers.js";
+import { V1, addAddress, agreeTransport, app, cleanupUsers, staffSession, type StaffSession, openSlot, phones, placeOrder, pool, request } from "./helpers.js";
 
 const PREFIX = "+2567994";
 const nextPhone = phones(PREFIX);
@@ -26,7 +26,7 @@ async function signIn(phone = nextPhone()) {
 }
 
 let productId: number;
-let staff: Awaited<ReturnType<typeof signIn>>;
+let staff: StaffSession;
 const createdZones: number[] = [];
 const createdSlots: number[] = [];
 
@@ -45,8 +45,7 @@ const setStatus = (id: number, status: string) =>
 beforeAll(async () => {
   // Untracked stock so many test orders can be placed.
   productId = (await pool.query("insert into products (name, price, in_stock) values ('TEST staff item', 3000, true) returning id")).rows[0].id;
-  staff = await signIn();
-  await makeAdmin(staff.userId);
+  staff = await staffSession(PREFIX);
 });
 
 afterAll(async () => {
@@ -64,7 +63,7 @@ describe("Access", () => {
     const customer = await signIn();
     for (const path of ["/admin/summary", "/admin/orders", "/admin/issues", "/admin/delivery/zones"]) {
       expect((await request(app).get(`${V1}${path}`)).status).toBe(401);
-      expect((await request(app).get(`${V1}${path}`).set(customer.h)).status).toBe(403);
+      expect((await request(app).get(`${V1}${path}`).set(customer.h)).status).toBe(401);
       expect((await request(app).get(`${V1}${path}`).set(staff.h)).status).toBe(200);
     }
   });
@@ -194,7 +193,7 @@ describe("Support", () => {
 
     const resolved = (await request(app).patch(`${V1}/admin/issues/${issue.id}`).set(staff.h)
       .send({ status: "resolved", resolution: "Refunded UGX 2,500 in cash" }).expect(200)).body;
-    expect(resolved).toMatchObject({ status: "resolved", resolvedBy: staff.userId });
+    expect(resolved).toMatchObject({ status: "resolved", resolvedByAdminId: staff.adminId });
     expect((await request(app).get(`${V1}/orders/${order.id}/issues`).set(u.h)).body[0].status).toBe("resolved");
   });
 

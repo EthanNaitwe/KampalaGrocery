@@ -1,4 +1,3 @@
-import nodemailer from "nodemailer";
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import connectPgSimple from "connect-pg-simple";
@@ -10,6 +9,7 @@ import { devLogOtp, isProduction, requireSecret } from "./config.js";
 import { issueCode, verifyCode, OTP_TTL_MS } from "./otp.js";
 import { verifyAccessToken } from "./tokens.js";
 import { sendSms, smsConfigured } from "./sms.js";
+import { emailConfigured, sendEmail } from "./mail.js";
 import { clearFailures } from "./passwords.js";
 import type { User } from "../shared/schema.js";
 
@@ -54,24 +54,11 @@ export function normalizeAuthIdentifier(identifier: string): string {
 }
 
 // ---- Delivery --------------------------------------------------------------
-const hasSmtp = () => !!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS;
-
-let emailTransporter: ReturnType<typeof nodemailer.createTransport> | null = null;
-function getMailer() {
-  emailTransporter ??= nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: process.env.SMTP_SECURE === "true",
-    auth: { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
-  });
-  return emailTransporter;
-}
-
 const minutes = Math.round(OTP_TTL_MS / 60000);
 
 async function deliverCode(identifier: string, code: string) {
   const isEmail = identifier.includes("@");
-  const configured = isEmail ? hasSmtp() : smsConfigured();
+  const configured = isEmail ? emailConfigured() : smsConfigured();
 
   if (!configured) {
     if (devLogOtp) {
@@ -87,8 +74,7 @@ async function deliverCode(identifier: string, code: string) {
 
   try {
     if (isEmail) {
-      await getMailer().sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      await sendEmail({
         to: identifier,
         subject: "Your FreshMart verification code",
         text: `Your FreshMart verification code is ${code}. It expires in ${minutes} minutes.`,

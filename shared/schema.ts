@@ -35,11 +35,42 @@ export const users = pgTable("users", {
   phoneNumber: varchar("phone_number").unique().notNull(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
-  isAdmin: boolean("is_admin").default(false),
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// ---- Staff console accounts (separate from customers) ------------------------
+/** People who run FreshMart. Sign in to the web console with email + password. */
+export const admins = pgTable("admins", {
+  id: varchar("id").primaryKey().notNull(),
+  email: varchar("email", { length: 200 }).notNull().unique(), // stored lower-case
+  name: varchar("name", { length: 100 }).notNull(),
+  /** owner: everything, incl. staff accounts, products, prices, delivery settings. staff: day-to-day operations. */
+  role: varchar("role", { length: 10 }).notNull().default("staff"),
+  /** scrypt hash (server/passwords.ts). Null until the invite is accepted. */
+  passwordHash: varchar("password_hash", { length: 255 }),
+  active: boolean("active").notNull().default(true),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+  lastLoginAt: timestamp("last_login_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Single-use links for accepting an invite or resetting a password. Only a SHA-256 of the token is stored. */
+export const adminTokens = pgTable("admin_tokens", {
+  id: serial("id").primaryKey(),
+  adminId: varchar("admin_id").references(() => admins.id, { onDelete: "cascade" }).notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  purpose: varchar("purpose", { length: 10 }).notNull(), // invite | reset
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("IDX_admin_tokens_admin").on(table.adminId, table.createdAt)]);
+
+export type Admin = typeof admins.$inferSelect;
+export type AdminRole = "owner" | "staff";
 
 // Optional password sign-in. Kept out of `users` so the hash never travels with user objects.
 // `hash` is scrypt in the form scrypt$N$r$p$salt$key (see server/passwords.ts).
@@ -141,6 +172,7 @@ export const supportIssues = pgTable("support_issues", {
   status: varchar("status", { length: 15 }).notNull().default("open"), // open | resolved
   resolution: text("resolution"),
   resolvedBy: varchar("resolved_by").references(() => users.id),
+  resolvedByAdminId: varchar("resolved_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   resolvedAt: timestamp("resolved_at"),
 }, (table) => [
@@ -159,6 +191,8 @@ export const inventoryMovements = pgTable("inventory_movements", {
   reason: varchar("reason", { length: 30 }).notNull(), // order | order_cancelled | restock | adjustment | count
   orderId: integer("order_id"),
   actorUserId: varchar("actor_user_id").references(() => users.id),
+  /** Set when a staff member (rather than the customer) made the change. */
+  actorAdminId: varchar("actor_admin_id").references(() => admins.id, { onDelete: "set null" }),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [index("IDX_inventory_product").on(table.productId, table.createdAt)]);
@@ -254,6 +288,8 @@ export const orderEvents = pgTable("order_events", {
   fromStatus: varchar("from_status", { length: 50 }),
   toStatus: varchar("to_status", { length: 50 }).notNull(),
   actorUserId: varchar("actor_user_id").references(() => users.id),
+  /** Set when a staff member (rather than the customer) made the change. */
+  actorAdminId: varchar("actor_admin_id").references(() => admins.id, { onDelete: "set null" }),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [index("IDX_order_events_order").on(table.orderId)]);

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  V1, addAddress, app, captureCodes, cleanupUsers, makeAdmin, openSlot, phones, placeOrder, pool, request,
+  V1, addAddress, app, captureCodes, cleanupUsers, staffSession, type StaffSession, openSlot, phones, placeOrder, pool, request,
   signIn as signInWith,
 } from "./helpers.js";
 
@@ -10,15 +10,14 @@ const { codes, restore } = captureCodes();
 const signIn = () => signInWith(codes, nextPhone());
 
 let productId: number;
-let admin: Awaited<ReturnType<typeof signIn>>;
+let admin: StaffSession;
 const stockOf = async () => (await pool.query("select stock_quantity from products where id = $1", [productId])).rows[0].stock_quantity;
 const setStock = (set: number) =>
   request(app).post(`${V1}/products/${productId}/stock`).set(admin.h).send({ set, reason: "count" });
 
 beforeAll(async () => {
   productId = (await pool.query("insert into products (name, price, in_stock) values ('TEST stocked item', 2000, true) returning id")).rows[0].id;
-  admin = await signIn();
-  await makeAdmin(admin.userId);
+  admin = await staffSession(PREFIX);
 });
 
 afterAll(async () => {
@@ -49,7 +48,7 @@ describe("Stock management", () => {
     expect((await request(app).post(`${V1}/products/${productId}/stock`).set(admin.h).send({ delta: -3, reason: "adjustment" })).status).toBe(400);
     expect(await stockOf()).toBe(2);
     const customer = await signIn();
-    expect((await request(app).post(`${V1}/products/${productId}/stock`).set(customer.h).send({ set: 99, reason: "count" })).status).toBe(403);
+    expect((await request(app).post(`${V1}/products/${productId}/stock`).set(customer.h).send({ set: 99, reason: "count" })).status).toBe(401);
   });
 
   it("product edits can't bypass the ledger", async () => {

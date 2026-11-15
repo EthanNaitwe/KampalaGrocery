@@ -7,6 +7,7 @@ import {
   app,
   captureCodes,
   cleanupUsers,
+  staffSession,
   openSlot,
   phones,
   placeOrder,
@@ -250,8 +251,7 @@ describe("Order lifecycle", () => {
 
   it("admins move orders only along allowed transitions, with an audit trail", async () => {
     const { u, orderId } = await newOrder();
-    const admin = await signIn();
-    await pool.query("update users set is_admin = true where id = $1", [admin.userId]);
+    const admin = await staffSession(PREFIX, "staff");
     const set = (status: string) => request(app).put(`${V1}/orders/${orderId}/status`).set(admin.h).send({ status });
 
     expect((await set("delivered")).status).toBe(409); // can't skip steps
@@ -271,7 +271,7 @@ describe("Order lifecycle", () => {
     expect(changes.map((e: { toStatus: string }) => e.toStatus)).toEqual([
       "pending", "confirmed", "preparing", "out_for_delivery", "delivered",
     ]);
-    const { rows } = await pool.query("select count(*) from order_events where order_id = $1 and actor_user_id = $2", [orderId, admin.userId]);
+    const { rows } = await pool.query("select count(*) from order_events where order_id = $1 and actor_admin_id = $2", [orderId, admin.adminId]);
     expect(Number(rows[0].count)).toBe(5); // 4 status changes + transport agreed
   });
 });

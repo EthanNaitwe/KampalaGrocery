@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { normalizePhoneNumber } from "../server/smsAuth.js";
 import {
-  V1, addAddress, agreeTransport, app, captureCodes, cleanupUsers, makeAdmin, openSlot, phones, placeOrder, pool, request,
+  V1, addAddress, agreeTransport, app, captureCodes, cleanupUsers, staffSession, type StaffSession, openSlot, phones, placeOrder, pool, request,
   signIn as signInWith,
 } from "./helpers.js";
 
@@ -12,7 +12,7 @@ const { codes, restore } = captureCodes();
 const signIn = () => signInWith(codes, nextPhone());
 
 let productId: number;
-let staff: Awaited<ReturnType<typeof signIn>>;
+let staff: StaffSession;
 
 async function order(u: Awaited<ReturnType<typeof signIn>>, quantity = 1) {
   await request(app).post(`${V1}/cart`).set(u.h).send({ productId, quantity }).expect(201);
@@ -23,8 +23,7 @@ async function order(u: Awaited<ReturnType<typeof signIn>>, quantity = 1) {
 
 beforeAll(async () => {
   productId = (await pool.query("insert into products (name, price, in_stock, stock_quantity) values ('TEST regression item', 1500, true, 50) returning id")).rows[0].id;
-  staff = await signIn();
-  await makeAdmin(staff.userId);
+  staff = await staffSession(PREFIX);
 });
 
 afterAll(async () => {
@@ -79,11 +78,14 @@ describe("Account deletion removes personal data", () => {
 });
 
 describe("Order access", () => {
-  it("GET /orders returns only the caller's own orders, even for staff", async () => {
+  it("GET /orders returns only the caller's own orders; staff use the queue", async () => {
     const customer = await signIn();
+    const other = await signIn();
     const o = await order(customer);
-    const mine = (await request(app).get(`${V1}/orders`).set(staff.h).expect(200)).body;
+    const mine = (await request(app).get(`${V1}/orders`).set(other.h).expect(200)).body;
     expect(mine.map((x: { id: number }) => x.id)).not.toContain(o.id);
+    // A staff console session is not a customer session.
+    expect((await request(app).get(`${V1}/orders`).set(staff.h)).status).toBe(401);
     // Staff still see it in the queue.
     const queue = (await request(app).get(`${V1}/admin/orders?status=all&q=${o.id}`).set(staff.h)).body;
     expect(queue.items.map((x: { id: number }) => x.id)).toContain(o.id);

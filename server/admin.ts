@@ -9,7 +9,7 @@ import {
   orders,
   products,
   supportIssues,
-  type User,
+  type Admin,
 } from "../shared/schema.js";
 import {
   LOW_STOCK_THRESHOLD,
@@ -114,12 +114,12 @@ export async function orderDetail(id: number): Promise<AdminOrderDetail> {
   return { ...order, events, notifications: notes, issues, zoneGuideFee: zone?.fee ?? null };
 }
 
-export async function assignRider(id: number, rider: string | null, admin: User) {
+export async function assignRider(id: number, rider: string | null, admin: Admin) {
   return db.transaction(async (tx) => {
     const [o] = await tx.update(orders).set({ assignedRider: rider, updatedAt: new Date() }).where(eq(orders.id, id)).returning();
     if (!o) throw new HttpError("NOT_FOUND", "Order not found");
     await tx.insert(orderEvents).values({
-      orderId: id, fromStatus: o.status, toStatus: o.status ?? "pending", actorUserId: admin.id,
+      orderId: id, fromStatus: o.status, toStatus: o.status ?? "pending", actorAdminId: admin.id,
       note: rider ? `Rider assigned: ${rider}` : "Rider unassigned",
     });
     return o;
@@ -163,13 +163,13 @@ export function listIssues(status: "open" | "resolved" | "all") {
     .then((rows) => rows.map((r) => ({ ...r.issue, customerPhone: r.customerPhone })));
 }
 
-export async function resolveIssue(id: number, status: "open" | "resolved", resolution: string | undefined, admin: User) {
+export async function resolveIssue(id: number, status: "open" | "resolved", resolution: string | undefined, admin: Admin) {
   const [i] = await db
     .update(supportIssues)
     .set(
       status === "resolved"
-        ? { status, resolution: resolution ?? null, resolvedBy: admin.id, resolvedAt: new Date() }
-        : { status, resolvedBy: null, resolvedAt: null },
+        ? { status, resolution: resolution ?? null, resolvedByAdminId: admin.id, resolvedAt: new Date() }
+        : { status, resolvedByAdminId: null, resolvedAt: null },
     )
     .where(eq(supportIssues.id, id))
     .returning();

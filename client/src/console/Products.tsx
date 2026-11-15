@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { api, fmtDateTime, ugx } from "./api";
 import { PageHeader } from "./Layout";
+import { useAdmin } from "./session";
 
 type StockMode = "count" | "restock" | "adjustment";
 
@@ -29,6 +30,7 @@ function StockCell({ p }: { p: ProductResponse }) {
 export default function Products() {
   const client = useQueryClient();
   const { toast } = useToast();
+  const { isOwner } = useAdmin();
   const [filter, setFilter] = useState("");
   const [stockFor, setStockFor] = useState<ProductResponse | null>(null);
   const [editing, setEditing] = useState<ProductResponse | "new" | null>(null);
@@ -50,8 +52,8 @@ export default function Products() {
     <div>
       <PageHeader
         title="Products & stock"
-        description="Stock changes are recorded in a ledger. 'Not counted' products sell without a limit."
-        actions={<Button onClick={() => setEditing("new")}><Plus className="h-4 w-4 mr-1" /> New product</Button>}
+        description={`Stock changes are recorded in a ledger. 'Not counted' products sell without a limit.${isOwner ? "" : " Ask an owner to change products or prices."}`}
+        actions={isOwner && <Button onClick={() => setEditing("new")}><Plus className="h-4 w-4 mr-1" /> New product</Button>}
       />
       <Input placeholder="Filter by name" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs mb-3" />
 
@@ -78,12 +80,12 @@ export default function Products() {
                   <TableCell className="text-right whitespace-nowrap">{ugx(p.price)}</TableCell>
                   <TableCell className="text-right"><StockCell p={p} /></TableCell>
                   <TableCell>
-                    <Switch checked={p.inStock !== false} onCheckedChange={() => toggle.mutate(p)} aria-label={`${p.name} on sale`} />
+                    <Switch checked={p.inStock !== false} onCheckedChange={() => toggle.mutate(p)} disabled={!isOwner} aria-label={`${p.name} on sale`} />
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap space-x-1">
                     <Button size="sm" variant="secondary" onClick={() => setStockFor(p)}>Stock</Button>
                     <Button size="sm" variant="ghost" onClick={() => setHistoryFor(p)} aria-label="Stock history"><History className="h-4 w-4" /></Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(p)}>Edit</Button>
+                    {isOwner && <Button size="sm" variant="ghost" onClick={() => setEditing(p)}>Edit</Button>}
                   </TableCell>
                 </TableRow>
               ))}

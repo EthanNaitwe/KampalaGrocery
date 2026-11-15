@@ -72,7 +72,7 @@ export async function cleanupUsers(prefix: string) {
   const ids = (await pool.query("select id from users where phone_number like $1", [`${prefix}%`])).rows.map((r) => r.id);
   const orderIds = "(select id from orders where user_id = any($1))";
   await pool.query(`delete from notifications where user_id = any($1) or order_id in ${orderIds}`, [ids]);
-  await pool.query(`delete from support_issues where user_id = any($1) or resolved_by = any($1) or order_id in ${orderIds}`, [ids]);
+  await pool.query(`delete from support_issues where user_id = any($1) or order_id in ${orderIds}`, [ids]);
   await pool.query("delete from order_events where order_id in (select id from orders where user_id = any($1))", [ids]);
   await pool.query("delete from order_events where actor_user_id = any($1)", [ids]);
   await pool.query(
@@ -84,6 +84,7 @@ export async function cleanupUsers(prefix: string) {
   await pool.query("delete from cart_items where user_id = any($1)", [ids]);
   await pool.query("delete from users where id = any($1)", [ids]); // addresses + refresh tokens cascade
   await pool.query("delete from otp_verifications where phone_number like $1", [`${prefix}%`]);
+  await cleanupStaff(prefix);
 }
 
 /** Staff record the transport fee agreed with the customer (required before dispatch). */
@@ -91,6 +92,28 @@ export function agreeTransport(staffH: Record<string, string>, orderId: number, 
   return request(app).post(`${V1}/admin/orders/${orderId}/transport`).set(staffH).send({ fee });
 }
 
-export async function makeAdmin(userId: string) {
-  await pool.query("update users set is_admin = true where id = $1", [userId]);
+export const STAFF_PASSWORD = "test-staff-password";
+const staffEmailPrefix = (prefix: string) => `staff${prefix.replace(/\D/g, "")}-`;
+
+export type StaffSession = { adminId: string; email: string; h: Record<string, string> };
+
+/** Creates a console account (owner by default) and signs it in; `h` carries the session cookie. */
+export async function staffSession(prefix: string, role: "owner" | "staff" = "owner"): Promise<StaffSession> {
+  const { hashPassword } = await import("../server/passwords.js");
+  const email = `${staffEmailPrefix(prefix)}${randomUUID().slice(0, 8)}@example.com`;
+  const adminId = randomUUID();
+  await pool.query("insert into admins (id, email, name, role, password_hash) values ($1, $2, $3, $4, $5)", [
+    adminId, email, `Test ${role}`, role, await hashPassword(STAFF_PASSWORD),
+  ]);
+  const res = await request(app).post(`${V1}/admin/auth/login`).send({ email, password: STAFF_PASSWORD });
+  expect(res.status).toBe(200);
+  const cookie = (res.headers["set-cookie"] as unknown as string[]).map((c) => c.split(";")[0]).join("; ");
+  return { adminId, email, h: { Cookie: cookie } };
+}
+
+/** Removes console accounts created by staffSession(prefix) and their sessions. */
+export async function cleanupStaff(prefix: string) {
+  const ids = (await pool.query("select id from admins where email like $1", [`${staffEmailPrefix(prefix)}%`])).rows.map((r) => r.id);
+  await pool.query("delete from sessions where sess->>'adminId' = any($1)", [ids]);
+  await pool.query("delete from admins where id = any($1)", [ids]); // tokens cascade; audit columns set null
 }

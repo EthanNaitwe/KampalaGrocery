@@ -381,6 +381,7 @@ function OrderSheet({ id, onClose }: { id: number | null; onClose: () => void })
                     <span>
                       {e.fromStatus === e.toStatus ? "Update" : statusLabel(e.toStatus)}
                       {e.note && <span className="text-muted-foreground"> — {e.note}</span>}
+                      {e.actorName && <span className="text-muted-foreground"> · {e.actorName}</span>}
                     </span>
                     <span className="text-muted-foreground whitespace-nowrap">{fmtDateTime(e.createdAt)}</span>
                   </li>

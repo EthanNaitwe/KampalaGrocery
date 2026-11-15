@@ -5,6 +5,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "./db.js";
 import {
+  admins,
   addresses,
   cartItems,
   deliverySlots,
@@ -13,6 +14,7 @@ import {
   orderItems,
   orders,
   products,
+  type Admin,
   type Order,
   type User,
 } from "../shared/schema.js";
@@ -28,7 +30,7 @@ import {
   type ZoneResponse,
 } from "../shared/api.js";
 import { HttpError } from "./http.js";
-import { deductForOrder, restockForOrder, sellableQuantity, shortageMessage, type Shortage } from "./inventory.js";
+import { actorCols, deductForOrder, restockForOrder, type Actor, sellableQuantity, shortageMessage, type Shortage } from "./inventory.js";
 
 function shortagesOf(cart: Array<{ productId: number; name: string; quantity: number; inStock: boolean | null; stockQuantity: number | null }>): Shortage[] {
   return cart.flatMap((i) => {
@@ -278,7 +280,7 @@ export async function placeOrder(user: User, body: PlaceOrderBody, key: string):
 }
 
 // ---- Lifecycle --------------------------------------------------------------
-async function transition(orderId: number, actor: User, to: OrderStatus, guard: (o: Order) => void, note?: string) {
+async function transition(orderId: number, actor: Actor, to: OrderStatus, guard: (o: Order) => void, note?: string) {
   return db.transaction(async (tx) => {
     const { rows } = await tx.execute<{ id: number }>(sql`select id from orders where id = ${orderId} for update`);
     if (!rows[0]) throw new HttpError("NOT_FOUND", "Order not found");
@@ -298,8 +300,8 @@ async function transition(orderId: number, actor: User, to: OrderStatus, guard: 
       .set({ status: to, paymentStatus, updatedAt: new Date(), ...(to === "cancelled" && { cancelledAt: new Date() }) })
       .where(eq(orders.id, orderId))
       .returning();
-    if (to === "cancelled") await restockForOrder(tx, orderId, actor.id);
-    await tx.insert(orderEvents).values({ orderId, fromStatus: from, toStatus: to, actorUserId: actor.id, note: note ?? null });
+    if (to === "cancelled") await restockForOrder(tx, orderId, actor);
+    await tx.insert(orderEvents).values({ orderId, fromStatus: from, toStatus: to, ...actorCols(actor), note: note ?? null });
     return updated;
   });
 }
@@ -307,7 +309,7 @@ async function transition(orderId: number, actor: User, to: OrderStatus, guard: 
 export function cancelByCustomer(user: User, orderId: number, reason?: string) {
   return transition(
     orderId,
-    user,
+    { userId: user.id },
     "cancelled",
     (o) => {
       if (o.userId !== user.id) throw new HttpError("NOT_FOUND", "Order not found");
@@ -319,14 +321,22 @@ export function cancelByCustomer(user: User, orderId: number, reason?: string) {
   );
 }
 
-export function changeStatusByAdmin(admin: User, orderId: number, to: OrderStatus, note?: string) {
-  return transition(orderId, admin, to, () => {}, note);
+export function changeStatusByAdmin(admin: Admin, orderId: number, to: OrderStatus, note?: string) {
+  return transition(orderId, { adminId: admin.id }, to, () => {}, note);
 }
 
 export async function listOrderEvents(orderId: number) {
   return db
-    .select({ fromStatus: orderEvents.fromStatus, toStatus: orderEvents.toStatus, note: orderEvents.note, createdAt: orderEvents.createdAt })
+    .select({
+      fromStatus: orderEvents.fromStatus,
+      toStatus: orderEvents.toStatus,
+      note: orderEvents.note,
+      createdAt: orderEvents.createdAt,
+      /** Staff member's name, or null when the customer (or the system) made the change. */
+      actorName: admins.name,
+    })
     .from(orderEvents)
+    .leftJoin(admins, eq(admins.id, orderEvents.actorAdminId))
     .where(eq(orderEvents.orderId, orderId))
     .orderBy(asc(orderEvents.id));
 }
@@ -335,7 +345,7 @@ export async function listOrderEvents(orderId: number) {
  * Staff record the transport fee agreed with the customer. Allowed until the order leaves
  * (it can be corrected before dispatch). Total becomes items + transport.
  */
-export async function agreeTransport(admin: User, orderId: number, fee: string, note?: string) {
+export async function agreeTransport(admin: Admin, orderId: number, fee: string, note?: string) {
   return db.transaction(async (tx) => {
     const [o] = await tx.select().from(orders).where(eq(orders.id, orderId)).for("update");
     if (!o) throw new HttpError("NOT_FOUND", "Order not found");
@@ -349,7 +359,7 @@ export async function agreeTransport(admin: User, orderId: number, fee: string, 
       .where(eq(orders.id, orderId))
       .returning();
     await tx.insert(orderEvents).values({
-      orderId, fromStatus: o.status, toStatus: o.status ?? "pending", actorUserId: admin.id,
+      orderId, fromStatus: o.status, toStatus: o.status ?? "pending", actorAdminId: admin.id,
       note: `Transport agreed: UGX ${Math.round(Number(fee)).toLocaleString("en-US")}${note ? ` (${note})` : ""}`,
     });
     return updated;

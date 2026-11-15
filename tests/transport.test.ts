@@ -1,7 +1,7 @@
 /** Delivery location pins and per-order transport agreement. */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  V1, agreeTransport, app, captureCodes, cleanupUsers, firstZoneId, makeAdmin, openSlot, phones, placeOrder, pool, request,
+  V1, agreeTransport, app, captureCodes, cleanupUsers, firstZoneId, staffSession, type StaffSession, openSlot, phones, placeOrder, pool, request,
   signIn as signInWith,
 } from "./helpers.js";
 
@@ -14,7 +14,7 @@ const signIn = () => signInWith(codes, nextPhone());
 const PIN = { latitude: 0.3333, longitude: 32.5951 };
 
 let productId: number;
-let staff: Awaited<ReturnType<typeof signIn>>;
+let staff: StaffSession;
 
 async function pinnedAddress(h: Record<string, string>) {
   const res = await request(app).post(`${V1}/addresses`).set(h)
@@ -35,8 +35,7 @@ const move = (id: number, status: string) => request(app).put(`${V1}/orders/${id
 
 beforeAll(async () => {
   productId = (await pool.query("insert into products (name, price, in_stock) values ('TEST transport item', 4000, true) returning id")).rows[0].id;
-  staff = await signIn();
-  await makeAdmin(staff.userId);
+  staff = await staffSession(PREFIX);
 });
 
 afterAll(async () => {
@@ -114,7 +113,7 @@ describe("Transport agreed per order", () => {
   it("only staff can set it, with a valid amount", async () => {
     const u = await signIn();
     const o = await newOrder(u);
-    expect((await agreeTransport(u.h, o.id, 1000)).status).toBe(403);
+    expect((await agreeTransport(u.h, o.id, 1000)).status).toBe(401);
     expect((await agreeTransport(staff.h, o.id, "-5")).status).toBe(400);
     expect((await agreeTransport(staff.h, o.id, "abc")).status).toBe(400);
   });

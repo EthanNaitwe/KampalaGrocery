@@ -34,6 +34,13 @@ export interface Shortage {
  * Deducts stock for an order inside the caller's transaction. Throws CONFLICT with the
  * shortages if any line can't be fulfilled. Untracked products (NULL stock) are not deducted.
  */
+/** Who made a change: the customer (their own order) or a staff member in the console. */
+export type Actor = { userId: string } | { adminId: string };
+export const actorCols = (a: Actor) => ({
+  actorUserId: "userId" in a ? a.userId : null,
+  actorAdminId: "adminId" in a ? a.adminId : null,
+});
+
 export async function deductForOrder(
   tx: Tx,
   lines: Array<{ productId: number; quantity: number }>,
@@ -63,7 +70,7 @@ export async function deductForOrder(
 }
 
 /** Returns exactly what this order deducted (from the ledger), e.g. on cancellation. Idempotent. */
-export async function restockForOrder(tx: Tx, orderId: number, actorUserId: string) {
+export async function restockForOrder(tx: Tx, orderId: number, actor: Actor) {
   const { rows } = await tx.execute<{ product_id: number; net: string }>(sql`
     select product_id, sum(delta) as net from inventory_movements
     where order_id = ${orderId} and reason in ('order', 'order_cancelled')
@@ -77,7 +84,7 @@ export async function restockForOrder(tx: Tx, orderId: number, actorUserId: stri
     const balance = (p.stockQuantity ?? 0) + qty;
     await tx.update(products).set({ stockQuantity: balance, updatedAt: new Date() }).where(eq(products.id, p.id));
     await tx.insert(inventoryMovements).values({
-      productId: p.id, delta: qty, balance, reason: "order_cancelled", orderId, actorUserId,
+      productId: p.id, delta: qty, balance, reason: "order_cancelled", orderId, ...actorCols(actor),
     });
   }
 }
@@ -90,7 +97,7 @@ export async function adjustStock(
   productId: number,
   change: { set: number } | { delta: number },
   reason: "count" | "restock" | "adjustment",
-  actorUserId: string,
+  actor: Actor,
   note?: string,
 ) {
   return db.transaction(async (tx) => {
@@ -101,7 +108,7 @@ export async function adjustStock(
     if (balance < 0) throw new HttpError("VALIDATION_ERROR", `Stock can't go below zero (currently ${current})`);
     const delta = p.stockQuantity == null && "set" in change ? balance : balance - current;
     const [updated] = await tx.update(products).set({ stockQuantity: balance, updatedAt: new Date() }).where(eq(products.id, productId)).returning();
-    await tx.insert(inventoryMovements).values({ productId, delta, balance, reason, actorUserId, note: note ?? null });
+    await tx.insert(inventoryMovements).values({ productId, delta, balance, reason, ...actorCols(actor), note: note ?? null });
     return updated;
   });
 }

@@ -205,7 +205,7 @@ export type CartItemResponse = CartItem & { product: Product };
 export type OrderResponse = Order;
 export type OrderDetailResponse = Order & {
   orderItems: Array<{ product: Product; quantity: number; price: string }>;
-  events?: Array<Pick<OrderEvent, "fromStatus" | "toStatus" | "note" | "createdAt">>;
+  events?: Array<Pick<OrderEvent, "fromStatus" | "toStatus" | "note" | "createdAt"> & { actorName?: string | null }>;
 };
 
 export type ZoneResponse = Pick<DeliveryZone, "id" | "name" | "fee" | "minOrder">;
@@ -339,3 +339,35 @@ export interface AdminSummary {
 }
 export type AdminZone = DeliveryZone;
 export type AdminSlot = DeliverySlot;
+
+// ---- Staff console accounts ------------------------------------------------
+const email = z.string().trim().toLowerCase().email("Enter a valid email address").max(200);
+export const adminRole = z.enum(["owner", "staff"]);
+
+export const adminLoginBody = z.object({ email, password: z.string().min(1).max(128) });
+export const adminForgotBody = z.object({ email });
+/** Accept an invite or finish a reset: the emailed token plus the new password. */
+export const adminSetPasswordBody = z.object({ token: z.string().min(20).max(200), password: passwordRule });
+export const adminChangePasswordBody = z.object({ currentPassword: z.string().min(1).max(128), password: passwordRule });
+export const createStaffBody = z.object({ email, name: z.string().trim().min(1).max(100), role: adminRole.default("staff") });
+export const updateStaffBody = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  role: adminRole.optional(),
+  active: z.boolean().optional(),
+});
+
+/** What the console knows about the signed-in staff member (never the password hash). */
+export interface AdminProfile {
+  id: string;
+  email: string;
+  name: string;
+  role: "owner" | "staff";
+}
+
+export interface StaffMember extends AdminProfile {
+  active: boolean;
+  /** False until they accept their invite and set a password. */
+  hasPassword: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}

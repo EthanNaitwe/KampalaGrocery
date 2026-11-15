@@ -8,6 +8,7 @@ import { changePassword, hasPassword, loginWithPassword, setPassword } from "./p
 import { insertProductSchema, insertCategorySchema, sendOtpSchema, verifyOtpSchema } from "../shared/schema.js";
 import {
   passwordLoginBody, passwordResetBody, setPasswordBody, type PasswordStatus,
+  adminChangePasswordBody, adminForgotBody, adminLoginBody, adminSetPasswordBody, createStaffBody, updateStaffBody,
   idParam,
   productIdParam,
   listProductsQuery,
@@ -60,7 +61,11 @@ import {
   listOrderEvents,
   agreeTransport,
 } from "./checkout.js";
-import { HttpError, errorMiddleware, handle, parse, requireAdmin, sendError } from "./http.js";
+import { HttpError, errorMiddleware, handle, parse, sendError } from "./http.js";
+import {
+  changeAdminPassword, createStaff, listStaff, loginAdmin, profile, requestPasswordReset, requireOwner, requireStaff,
+  resendInvite, setPasswordWithToken, startAdminSession, updateStaff,
+} from "./adminAuth.js";
 
 // Stock changes only through POST /products/:id/stock so every change is in the ledger.
 const productWriteSchema = insertProductSchema.omit({ stockQuantity: true });
@@ -212,7 +217,7 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(await storage.getCategories());
   }));
 
-  r.post("/categories", isAuthenticated, requireAdmin, handle(async (req, res) => {
+  r.post("/categories", requireStaff, requireOwner, handle(async (req, res) => {
     const body = parse(insertCategorySchema, req.body);
     res.status(201).json(await storage.createCategory(body));
   }));
@@ -229,19 +234,19 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(product);
   }));
 
-  r.post("/products", isAuthenticated, requireAdmin, handle(async (req, res) => {
+  r.post("/products", requireStaff, requireOwner, handle(async (req, res) => {
     const body = parse(productWriteSchema, req.body);
     res.status(201).json(await storage.createProduct(body));
   }));
 
-  r.put("/products/:id", isAuthenticated, requireAdmin, handle(async (req, res) => {
+  r.put("/products/:id", requireStaff, requireOwner, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     const body = parse(productWriteSchema.partial(), req.body);
     if (!(await storage.getProduct(id))) throw new HttpError("NOT_FOUND", "Product not found");
     res.json(await storage.updateProduct(id, body));
   }));
 
-  r.delete("/products/:id", isAuthenticated, requireAdmin, handle(async (req, res) => {
+  r.delete("/products/:id", requireStaff, requireOwner, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     if (!(await storage.getProduct(id))) throw new HttpError("NOT_FOUND", "Product not found");
     try {
@@ -257,14 +262,14 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   }));
 
   // ---- Inventory (staff) -------------------------------------------------
-  r.post("/products/:id/stock", isAuthenticated, requireAdmin, handle(async (req, res) => {
+  r.post("/products/:id/stock", requireStaff, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     const body = parse(adjustStockBody, req.body);
     const change = "set" in body ? { set: body.set } : { delta: body.delta };
-    res.json(await adjustStock(id, change, body.reason, req.user.id, body.note));
+    res.json(await adjustStock(id, change, body.reason, { adminId: req.admin.id }, body.note));
   }));
 
-  r.get("/products/:id/stock-movements", isAuthenticated, requireAdmin, handle(async (req, res) => {
+  r.get("/products/:id/stock-movements", requireStaff, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     res.json(await listMovements(id));
   }));
@@ -339,8 +344,8 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   r.get("/orders/:id", isAuthenticated, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     const order = await storage.getOrder(id);
-    // Non-admins get 404 (not 403) for other users' orders so ids can't be probed.
-    if (!order || (!req.user.isAdmin && order.userId !== req.user.id)) {
+    // Other customers' orders are 404 (not 403) so ids can't be probed. Staff use /admin/orders/:id.
+    if (!order || order.userId !== req.user.id) {
       throw new HttpError("NOT_FOUND", "Order not found");
     }
     res.json({ ...order, events: await listOrderEvents(id) });
@@ -369,10 +374,10 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(order);
   }));
 
-  r.put("/orders/:id/status", isAuthenticated, requireAdmin, handle(async (req, res) => {
+  r.put("/orders/:id/status", requireStaff, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     const { status, note } = parse(updateOrderStatusBody, req.body);
-    const order = await changeStatusByAdmin(req.user, id, status, note);
+    const order = await changeStatusByAdmin(req.admin, id, status, note);
     await notifyOrder(order, templateForStatus[status]);
     res.json(order);
   }));
@@ -407,30 +412,79 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(await db.select().from(supportIssues).where(eq(supportIssues.orderId, order.id)).orderBy(desc(supportIssues.id)));
   }));
 
+  // ---- Staff console sign-in (email + password, cookie session) ---------------
+  r.post("/admin/auth/login", handle(async (req, res) => {
+    const { email, password } = parse(adminLoginBody, req.body);
+    const a = await loginAdmin(email, password);
+    await startAdminSession(req, a);
+    res.json(profile(a));
+  }));
+
+  r.post("/admin/auth/logout", handle(async (req, res) => {
+    await logout(req);
+    res.json({ message: "Signed out" });
+  }));
+
+  // Always the same reply, so this can't be used to find out which emails are staff.
+  r.post("/admin/auth/forgot", handle(async (req, res) => {
+    await requestPasswordReset(parse(adminForgotBody, req.body).email);
+    res.json({ message: "If that email belongs to a staff account, a reset link is on its way." });
+  }));
+
+  // Accept an invite or finish a reset, then sign in.
+  r.post("/admin/auth/set-password", handle(async (req, res) => {
+    const { token, password } = parse(adminSetPasswordBody, req.body);
+    const a = await setPasswordWithToken(token, password);
+    await startAdminSession(req, a);
+    res.json(profile(a));
+  }));
+
+  r.get("/admin/auth/me", requireStaff, handle(async (req, res) => res.json(profile(req.admin))));
+
+  r.put("/admin/auth/password", requireStaff, handle(async (req, res) => {
+    const { currentPassword, password } = parse(adminChangePasswordBody, req.body);
+    await changeAdminPassword(req.admin, currentPassword, password, req);
+    res.json({ message: "Password changed" });
+  }));
+
   // ---- Staff console --------------------------------------------------------
+  const staffIdParam = z.object({ id: z.string().min(1).max(64) });
   const admin = Router();
-  admin.use(isAuthenticated, requireAdmin);
+  admin.use(requireStaff);
+  // Owner-only: staff accounts.
+  admin.get("/staff", requireOwner, handle(async (_req, res) => res.json(await listStaff())));
+  admin.post("/staff", requireOwner, handle(async (req, res) => {
+    const result = await createStaff(req.admin, parse(createStaffBody, req.body));
+    res.status(201).json(result);
+  }));
+  admin.patch("/staff/:id", requireOwner, handle(async (req, res) => {
+    res.json(await updateStaff(req.admin, parse(staffIdParam, req.params).id, parse(updateStaffBody, req.body)));
+  }));
+  admin.post("/staff/:id/invite", requireOwner, handle(async (req, res) => {
+    await resendInvite(req.admin, parse(staffIdParam, req.params).id);
+    res.json({ message: "Invite sent" });
+  }));
   admin.get("/summary", handle(async (_req, res) => res.json(await summary())));
   admin.get("/orders", handle(async (req, res) => res.json(await listOrders(parse(adminOrdersQuery, req.query)))));
   admin.get("/orders/:id", handle(async (req, res) => res.json(await orderDetail(parse(idParam, req.params).id))));
   admin.patch("/orders/:id", handle(async (req, res) => {
     const { assignedRider } = parse(adminOrderPatchBody, req.body);
-    res.json(await assignRider(parse(idParam, req.params).id, assignedRider || null, req.user));
+    res.json(await assignRider(parse(idParam, req.params).id, assignedRider || null, req.admin));
   }));
   admin.post("/orders/:id/transport", handle(async (req, res) => {
     const { fee, note } = parse(agreeTransportBody, req.body);
-    const order = await agreeTransport(req.user, parse(idParam, req.params).id, fee, note);
+    const order = await agreeTransport(req.admin, parse(idParam, req.params).id, fee, note);
     await notifyOrder(order, "order_transport_agreed");
     res.json(order);
   }));
   admin.post("/notifications/:id/resend", handle(async (req, res) => res.json(await resendNotification(parse(idParam, req.params).id))));
   admin.get("/delivery/zones", handle(async (_req, res) => res.json(await listAllZones())));
-  admin.post("/delivery/zones", handle(async (req, res) => res.status(201).json(await createZone(parse(zoneBody, req.body)))));
-  admin.patch("/delivery/zones/:id", handle(async (req, res) =>
+  admin.post("/delivery/zones", requireOwner, handle(async (req, res) => res.status(201).json(await createZone(parse(zoneBody, req.body)))));
+  admin.patch("/delivery/zones/:id", requireOwner, handle(async (req, res) =>
     res.json(await updateZone(parse(idParam, req.params).id, parse(zoneBody.partial(), req.body)))));
   admin.get("/delivery/slots", handle(async (_req, res) => res.json(await listAllSlots())));
-  admin.post("/delivery/slots", handle(async (req, res) => res.status(201).json(await createSlot(parse(slotBody, req.body)))));
-  admin.patch("/delivery/slots/:id", handle(async (req, res) =>
+  admin.post("/delivery/slots", requireOwner, handle(async (req, res) => res.status(201).json(await createSlot(parse(slotBody, req.body)))));
+  admin.patch("/delivery/slots/:id", requireOwner, handle(async (req, res) =>
     res.json(await updateSlot(parse(idParam, req.params).id, parse(slotPatchBody, req.body)))));
   admin.get("/issues", handle(async (req, res) => {
     const status = parse(z.object({ status: z.enum(["open", "resolved", "all"]).default("open") }), req.query).status;
@@ -438,7 +492,7 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   }));
   admin.patch("/issues/:id", handle(async (req, res) => {
     const body = parse(resolveIssueBody, req.body);
-    res.json(await resolveIssue(parse(idParam, req.params).id, body.status, body.resolution, req.user));
+    res.json(await resolveIssue(parse(idParam, req.params).id, body.status, body.resolution, req.admin));
   }));
   r.use("/admin", admin);
 

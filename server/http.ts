@@ -41,10 +41,6 @@ export function parse<T extends z.ZodTypeAny>(schema: T, data: unknown): z.infer
   return result.data;
 }
 
-export const requireAdmin: RequestHandler = (req: any, res, next) => {
-  if (!req.user?.isAdmin) return sendError(res, "FORBIDDEN", "Admin access required");
-  next();
-};
 
 export function errorMiddleware(err: any, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof HttpError) return sendError(res, err.code, err.message, err.details);

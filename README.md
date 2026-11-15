@@ -13,8 +13,13 @@ from the **web console**. Both talk to one Express API backed by PostgreSQL.
 
 ## What it does
 
-- **Sign-in**: 6-digit SMS (or email) codes, hashed, single-use, attempt-limited and throttled.
-  Mobile uses rotating refresh tokens in secure device storage; the console uses a cookie session.
+- **Customer sign-in** (mobile): a 6-digit SMS code, or phone number + an optional password.
+  Codes are hashed, single-use, attempt-limited and throttled; tokens rotate and live in secure storage.
+- **Staff sign-in** (console): separate staff accounts (`admins` table) with email + password and a
+  cookie session. Two roles: **owner** (everything, incl. staff accounts, products, prices and delivery
+  settings) and **staff** (orders, transport, stock counts, support issues). Owners invite staff by
+  email; forgotten passwords are reset through an emailed link. 5 wrong passwords lock an account
+  for 15 minutes.
 - **Catalog and cart**: categories, search, a cart stored on the server, and stock counts.
   Products marked "not counted" sell without a limit.
 - **Checkout**: saved addresses, delivery areas with fees and minimum orders, daily slots with
@@ -38,7 +43,16 @@ npm run dev               # API + staff console on http://localhost:5000
 
 With `DEV_LOG_OTP=true` (development only) and no SMS provider, sign-in codes print to the server log.
 
-To make a user staff, sign in once and then set `users.is_admin = true` for that user in the database.
+Create the first owner account from the command line (the password is typed at a hidden prompt):
+
+```bash
+npm run admin -- create you@example.com "Your Name"     # owner; add --staff for a staff account
+npm run admin -- reset-password you@example.com         # if nobody can sign in
+npm run admin -- list
+```
+
+Owners add everyone else from **Staff accounts** in the console. Invite and reset emails need the
+`SMTP_*` settings and `CONSOLE_URL`; in development without SMTP the links are printed in the API log.
 
 ## Checks
 
@@ -72,6 +86,5 @@ Deploys don't apply migrations automatically.
 
 ## API
 
-Versioned under `/api/v1` (the mobile app and the console). `/api` is a legacy alias used by the
-console's sign-in. Request and response shapes are in [shared/api.ts](shared/api.ts). Errors always
+Versioned under `/api/v1` (the mobile app and the console). `/api` is a legacy alias. Request and response shapes are in [shared/api.ts](shared/api.ts). Errors always
 look like `{ message, error: { code, message, details? } }`.

@@ -8,8 +8,9 @@ export async function api<T>(path: string, opts: { method?: string; body?: unkno
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     credentials: "include",
   });
-  if (res.status === 401) {
-    queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+  // Session ended (signed out elsewhere, switched off, expired): back to the sign-in page.
+  if (res.status === 401 && !path.startsWith("/admin/auth/")) {
+    queryClient.invalidateQueries({ queryKey: ["admin-session"] });
   }
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => undefined);
