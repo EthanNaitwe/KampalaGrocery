@@ -98,7 +98,11 @@ describe("invites and password resets", () => {
     const email = `staff${PREFIX.replace(/\D/g, "")}-inv${Date.now()}@example.com`;
     const res = await request(app).post(`${V1}/admin/staff`).set(owner.h).send({ email, name: "New Helper" });
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ inviteSent: true, member: { email, role: "staff", hasPassword: false, active: true } });
+    // No SMTP in tests: the account is created, the link is only logged, and the owner is told so.
+    expect(res.body).toMatchObject({ inviteSent: false, member: { email, role: "staff", hasPassword: false, active: true } });
+    expect(res.body.inviteError).toMatch(/Email isn't set up/);
+    const resend = await request(app).post(`${V1}/admin/staff/${res.body.member.id}/invite`).set(owner.h);
+    expect(resend.body).toMatchObject({ emailed: false });
     expect((await login(email, STAFF_PASSWORD)).status).toBe(401); // no password yet
 
     const token = links.get(email)!;

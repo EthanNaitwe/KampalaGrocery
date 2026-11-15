@@ -461,8 +461,7 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(await updateStaff(req.admin, parse(staffIdParam, req.params).id, parse(updateStaffBody, req.body)));
   }));
   admin.post("/staff/:id/invite", requireOwner, handle(async (req, res) => {
-    await resendInvite(req.admin, parse(staffIdParam, req.params).id);
-    res.json({ message: "Invite sent" });
+    res.json(await resendInvite(req.admin, parse(staffIdParam, req.params).id));
   }));
   admin.get("/summary", handle(async (_req, res) => res.json(await summary())));
   admin.get("/orders", handle(async (req, res) => res.json(await listOrders(parse(adminOrdersQuery, req.query)))));

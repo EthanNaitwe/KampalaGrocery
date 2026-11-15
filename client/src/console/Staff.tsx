@@ -36,8 +36,9 @@ export default function Staff() {
     onError: fail,
   });
   const invite = useMutation({
-    mutationFn: (id: string) => api(`/admin/staff/${id}/invite`, { method: "POST", body: {} }),
-    onSuccess: () => toast({ title: "Invite sent" }),
+    mutationFn: (id: string) => api<{ emailed: boolean; message: string }>(`/admin/staff/${id}/invite`, { method: "POST", body: {} }),
+    onSuccess: (r) =>
+      toast(r.emailed ? { title: "Invite sent", description: r.message } : { title: "Invite not emailed", description: r.message, variant: "destructive" }),
     onError: fail,
   });
 

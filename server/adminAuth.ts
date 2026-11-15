@@ -136,25 +136,36 @@ async function issueToken(adminId: string, purpose: "invite" | "reset") {
   return `${consoleUrl()}/set-password?token=${token}`;
 }
 
-async function deliver(to: string, subject: string, body: ReturnType<typeof buttonEmail>, url: string) {
+/** Returns "email" when sent, or "logged" when (development only) the link was printed instead. */
+async function deliver(to: string, subject: string, body: ReturnType<typeof buttonEmail>, url: string): Promise<"email" | "logged"> {
   if (!emailConfigured()) {
     if (devLogOtp) {
       console.log(`[dev] ${subject} for ${to}: ${url}`);
-      return;
+      return "logged";
     }
     throw new HttpError("SERVICE_UNAVAILABLE", "Email isn't set up yet (SMTP settings missing)");
   }
   try {
     await sendEmail({ to, subject, ...body });
+    return "email";
   } catch (error: any) {
-    console.error("Staff email failed:", error?.code ?? error?.message);
-    throw new HttpError("SERVICE_UNAVAILABLE", "Could not send the email. Please try again.");
+    console.error("Staff email failed:", error?.code ?? "", error?.responseCode ?? "", error?.response ?? error?.message);
+    throw new HttpError("SERVICE_UNAVAILABLE", emailFailureMessage(error));
   }
 }
 
-export async function sendInvite(a: Admin, invitedBy: Admin) {
+/** A message the owner can act on, without exposing server details. */
+function emailFailureMessage(error: any) {
+  if (error?.code === "EAUTH") return "The email server rejected the SMTP login. Check SMTP_USER and SMTP_PASS (Gmail needs an App Password).";
+  if (["ECONNECTION", "ETIMEDOUT", "ESOCKET", "EDNS"].includes(error?.code)) return "Couldn't reach the email server. Check SMTP_HOST and SMTP_PORT.";
+  return "Could not send the email. Please try again.";
+}
+
+const NOT_EMAILED = "Email isn't set up on the server (SMTP settings missing), so the link was printed in the server log instead.";
+
+export async function sendInvite(a: Admin, invitedBy: Admin): Promise<"email" | "logged"> {
   const url = await issueToken(a.id, "invite");
-  await deliver(a.email, "Your FreshMart staff console invite", buttonEmail({
+  return deliver(a.email, "Your FreshMart staff console invite", buttonEmail({
     heading: `Hi ${a.name}, you've been added to the FreshMart staff console`,
     lines: [`${invitedBy.name} added you as ${a.role === "owner" ? "an owner" : "staff"}. Choose a password to get started.`],
     button: "Set your password",
@@ -218,12 +229,14 @@ export async function createStaff(by: Admin, body: { email: string; name: string
   if (await byEmail(body.email)) throw new HttpError("CONFLICT", "There's already a staff account with this email");
   const [a] = await db.insert(admins).values({ id: nanoid(), email: body.email, name: body.name, role: body.role }).returning();
   try {
-    await sendInvite(a, by);
+    const how = await sendInvite(a, by);
+    return how === "email"
+      ? { member: staffMember(a), inviteSent: true }
+      : { member: staffMember(a), inviteSent: false, inviteError: NOT_EMAILED };
   } catch (error) {
     // Keep the account so the invite can be re-sent once email works.
     return { member: staffMember(a), inviteSent: false, inviteError: (error as Error).message };
   }
-  return { member: staffMember(a), inviteSent: true };
 }
 
 export async function updateStaff(by: Admin, id: string, body: { name?: string; role?: AdminRole; active?: boolean }) {
@@ -248,7 +261,9 @@ export async function resendInvite(by: Admin, id: string) {
   const a = await getAdmin(id);
   if (!a) throw new HttpError("NOT_FOUND", "Staff member not found");
   if (!a.active) throw new HttpError("CONFLICT", "Turn this account back on first");
-  await sendInvite(a, by);
+  return (await sendInvite(a, by)) === "email"
+    ? { emailed: true, message: `Invite emailed to ${a.email}` }
+    : { emailed: false, message: NOT_EMAILED };
 }
 
 // ---- Command line (scripts/admin.ts) ---------------------------------------------------
