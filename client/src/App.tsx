@@ -14,6 +14,7 @@ import Products from "@/console/Products";
 import Delivery from "@/console/Delivery";
 import Issues from "@/console/Issues";
 import Staff from "@/console/Staff";
+import Categories from "@/console/Categories";
 
 /**
  * The website is the FreshMart staff console (email + password accounts, separate from customers).
@@ -42,6 +43,7 @@ function Root() {
         <Route path="/orders" component={Orders} />
         <Route path="/products" component={Products} />
         <Route path="/issues" component={Issues} />
+        {admin.role === "owner" && <Route path="/categories" component={Categories} />}
         {admin.role === "owner" && <Route path="/delivery" component={Delivery} />}
         {admin.role === "owner" && <Route path="/staff" component={Staff} />}
         <Route component={NotFound} />

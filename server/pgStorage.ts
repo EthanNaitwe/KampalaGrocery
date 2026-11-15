@@ -98,7 +98,7 @@ export class PostgresStorage implements IStorage {
 
   // Categories
   async getCategories(): Promise<Category[]> {
-    return db.select().from(categories).orderBy(categories.id);
+    return db.select().from(categories).orderBy(categories.sortOrder, categories.id);
   }
 
   async createCategory(category: InsertCategory): Promise<Category> {

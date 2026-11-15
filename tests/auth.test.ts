@@ -184,7 +184,7 @@ describe("Authorization", () => {
     expect((await request(app).post(`${V1}/products`).set(h).send({ name: "x", price: "1" })).status).toBe(401);
     expect((await request(app).put(`${V1}/products/${productId}`).set(h).send({ price: "1" })).status).toBe(401);
     expect((await request(app).delete(`${V1}/products/${productId}`).set(h)).status).toBe(401);
-    expect((await request(app).post(`${V1}/categories`).set(h).send({ name: "x" })).status).toBe(401);
+    expect((await request(app).post(`${V1}/admin/categories`).set(h).send({ name: "x" })).status).toBe(401);
     expect((await request(app).put(`${V1}/orders/1/status`).set(h).send({ status: "delivered" })).status).toBe(401);
   });
 

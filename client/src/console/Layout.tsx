@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { KeyRound, LayoutDashboard, ListOrdered, LogOut, LifeBuoy, Package, Truck, Users } from "lucide-react";
+import { KeyRound, LayoutDashboard, Tags, ListOrdered, LogOut, LifeBuoy, Package, Truck, Users } from "lucide-react";
 import type { AdminProfile } from "@shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +14,7 @@ const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/orders", label: "Orders", icon: ListOrdered },
   { href: "/products", label: "Products & stock", icon: Package },
+  { href: "/categories", label: "Categories", icon: Tags, ownerOnly: true },
   { href: "/delivery", label: "Delivery", icon: Truck, ownerOnly: true },
   { href: "/issues", label: "Support issues", icon: LifeBuoy },
   { href: "/staff", label: "Staff accounts", icon: Users, ownerOnly: true },

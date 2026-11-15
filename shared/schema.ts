@@ -117,9 +117,12 @@ export const refreshTokens = pgTable("refresh_tokens", {
 export const categories = pgTable("categories", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),
+  /** An emoji shown in the app's category bubbles. */
   icon: varchar("icon", { length: 50 }),
+  /** Order in the app (lowest first); set by owners in the console. */
+  sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [uniqueIndex("UQ_categories_name").on(sql`lower(${table.name})`)]);
 
 export const products = pgTable("products", {
   id: serial("id").primaryKey(),
