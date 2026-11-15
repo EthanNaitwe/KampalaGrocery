@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 import { colors, radius, spacing } from "@/lib/theme";
 
@@ -48,6 +49,36 @@ export function Field({ label, error, ...props }: TextInputProps & { label: stri
         style={[styles.input, !!error && { borderColor: colors.danger }]}
         {...props}
       />
+      {!!error && <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text>}
+    </View>
+  );
+}
+
+/** Password input with a show/hide eye. */
+export function PasswordField({ label, error, ...props }: TextInputProps & { label: string; error?: string | null }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <View style={{ gap: spacing.xs }}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={[styles.input, { flexDirection: "row", alignItems: "center", paddingVertical: 0 }, !!error && { borderColor: colors.danger }]}>
+        <TextInput
+          placeholderTextColor={colors.muted}
+          accessibilityLabel={label}
+          secureTextEntry={!visible}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{ flex: 1, paddingVertical: 13, fontSize: 17, color: colors.text }}
+          {...props}
+        />
+        <Pressable
+          onPress={() => setVisible((v) => !v)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={visible ? "Hide password" : "Show password"}
+        >
+          <Ionicons name={visible ? "eye-off-outline" : "eye-outline"} size={20} color={colors.muted} />
+        </Pressable>
+      </View>
       {!!error && <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text>}
     </View>
   );

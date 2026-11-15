@@ -56,6 +56,31 @@ export const tokenRequestBody = z
   })
   .refine(hasIdentifier, { message: "Provide a phone number or email", path: ["phoneNumber"] });
 
+export const passwordRule = z.string().min(8, "Use at least 8 characters").max(128, "Use at most 128 characters");
+
+/** Sign in with phone number and password. */
+export const passwordLoginBody = z.object({
+  phoneNumber: z.string().trim().min(7).max(20),
+  password: z.string().min(1).max(128),
+  deviceName: z.string().trim().max(100).optional(),
+});
+
+/** Forgot password, or sign up with a password: prove the number with a code and set a new password. */
+export const passwordResetBody = z.object({
+  phoneNumber: z.string().trim().min(7).max(20),
+  otp: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
+  password: passwordRule,
+  deviceName: z.string().trim().max(100).optional(),
+});
+
+/** Set or change a password while signed in. `currentPassword` is required when one is already set. */
+export const setPasswordBody = z.object({
+  currentPassword: z.string().min(1).max(128).optional(),
+  password: passwordRule,
+});
+
+export interface PasswordStatus { hasPassword: boolean }
+
 export const refreshBody = z.object({ refreshToken: z.string().min(20).max(200) });
 export const logoutBody = z.object({ refreshToken: z.string().min(20).max(200).optional() }).optional();
 export const updateProfileBody = z.object({

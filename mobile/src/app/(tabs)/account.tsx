@@ -107,6 +107,7 @@ function AccountScreen() {
 
       <View style={[s.card, { paddingVertical: spacing.xs }, shadow]}>
         <MenuRow icon="receipt-outline" label="My orders" onPress={() => router.navigate("/orders")} />
+        <MenuRow icon="lock-closed-outline" label="Password" onPress={() => router.push("/password")} />
         <MenuRow icon="help-circle-outline" label="Help & support" onPress={() => router.push("/help")} last />
       </View>
 

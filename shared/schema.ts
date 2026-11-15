@@ -41,6 +41,16 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Optional password sign-in. Kept out of `users` so the hash never travels with user objects.
+// `hash` is scrypt in the form scrypt$N$r$p$salt$key (see server/passwords.ts).
+export const userPasswords = pgTable("user_passwords", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  hash: varchar("hash", { length: 255 }).notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // OTP verification table. `otp` stores an HMAC-SHA256 hash of the code, never the code itself.
 export const otpVerifications = pgTable("otp_verifications", {
   id: serial("id").primaryKey(),

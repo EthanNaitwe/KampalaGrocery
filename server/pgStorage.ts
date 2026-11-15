@@ -77,6 +77,7 @@ export class PostgresStorage implements IStorage {
 
       await tx.delete(cartItems).where(eq(cartItems.userId, id));
       await tx.delete(refreshTokens).where(eq(refreshTokens.userId, id));
+      await tx.execute(sql`delete from user_passwords where user_id = ${id}`);
       await tx.delete(addresses).where(eq(addresses.userId, id));
       // Orders stay for accounting, but without anything that identifies the person.
       await tx.execute(sql`

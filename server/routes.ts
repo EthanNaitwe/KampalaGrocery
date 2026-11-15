@@ -2,10 +2,12 @@ import { Router, type Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.js";
 import { pool } from "./db.js";
-import { isAuthenticated, sendOTP, verifyOTP, logout, startWebSession } from "./smsAuth.js";
-import { issueTokens, rotateRefreshToken, revokeRefreshToken } from "./tokens.js";
+import { isAuthenticated, sendOTP, verifyOTP, logout, normalizePhoneNumber, startWebSession } from "./smsAuth.js";
+import { issueTokens, revokeAllForUser, rotateRefreshToken, revokeRefreshToken } from "./tokens.js";
+import { changePassword, hasPassword, loginWithPassword, setPassword } from "./passwords.js";
 import { insertProductSchema, insertCategorySchema, sendOtpSchema, verifyOtpSchema } from "../shared/schema.js";
 import {
+  passwordLoginBody, passwordResetBody, setPasswordBody, type PasswordStatus,
   idParam,
   productIdParam,
   listProductsQuery,
@@ -122,6 +124,45 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     const tokens = await issueTokens(user.id, body.deviceName);
     const response: TokenResponse = { ...tokens, user };
     res.json(response);
+  }));
+
+  // ---- Password sign-in (optional alternative to codes) ---------------------
+  // Mobile: phone + password for tokens. Wrong tries lock the account for a while (see passwords.ts).
+  r.post("/auth/password/login", handle(async (req, res) => {
+    const body = parse(passwordLoginBody, req.body);
+    const user = await loginWithPassword(normalizePhoneNumber(body.phoneNumber), body.password);
+    const response: TokenResponse = { ...(await issueTokens(user.id, body.deviceName)), user };
+    res.json(response);
+  }));
+
+  // Web console: phone + password for a cookie session.
+  r.post("/auth/password/session", handle(async (req, res) => {
+    const body = parse(passwordLoginBody, req.body);
+    const user = await loginWithPassword(normalizePhoneNumber(body.phoneNumber), body.password);
+    await startWebSession(req, user);
+    res.json({ message: "Signed in", user });
+  }));
+
+  // Forgot password (or first sign-up with a password): a fresh code proves the number.
+  // Every other device is signed out, since whoever knew the old password may be using it.
+  r.post("/auth/password/reset", handle(async (req, res) => {
+    const body = parse(passwordResetBody, req.body);
+    const user = await verifyOTP(body.phoneNumber, body.otp);
+    await setPassword(user.id, body.password);
+    await revokeAllForUser(user.id);
+    const response: TokenResponse = { ...(await issueTokens(user.id, body.deviceName)), user };
+    res.json(response);
+  }));
+
+  r.get("/auth/password", isAuthenticated, handle(async (req, res) => {
+    const response: PasswordStatus = { hasPassword: await hasPassword(req.user.id) };
+    res.json(response);
+  }));
+
+  r.put("/auth/password", isAuthenticated, handle(async (req, res) => {
+    const body = parse(setPasswordBody, req.body);
+    await changePassword(req.user.id, body.password, body.currentPassword);
+    res.json({ hasPassword: true } satisfies PasswordStatus);
   }));
 
   // Mobile: rotate refresh token.

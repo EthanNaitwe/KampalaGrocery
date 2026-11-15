@@ -10,6 +10,7 @@ import { devLogOtp, isProduction, requireSecret } from "./config.js";
 import { issueCode, verifyCode, OTP_TTL_MS } from "./otp.js";
 import { verifyAccessToken } from "./tokens.js";
 import { sendSms, smsConfigured } from "./sms.js";
+import { clearFailures } from "./passwords.js";
 import type { User } from "../shared/schema.js";
 
 // ---- Sessions (web) --------------------------------------------------------
@@ -117,7 +118,11 @@ export async function verifyOTP(identifier: string, code: string): Promise<User>
     throw new HttpError("UNAUTHORIZED", "Invalid or expired code");
   }
   const existing = await storage.getUserByPhone(normalized);
-  if (existing) return existing;
+  if (existing) {
+    // Proving the number with a code also lifts any wrong-password lock.
+    await clearFailures(existing.id);
+    return existing;
+  }
   return storage.upsertUser({
     id: nanoid(),
     phoneNumber: normalized,

@@ -17,6 +17,9 @@ type AuthState = {
   user: UserResponse | null;
   requestCode: (phoneNumber: string) => Promise<void>;
   verifyCode: (phoneNumber: string, otp: string) => Promise<void>;
+  signInWithPassword: (phoneNumber: string, password: string) => Promise<void>;
+  /** Forgot password (or sign up with one): a code proves the number and sets the new password. */
+  resetPassword: (phoneNumber: string, otp: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
 };
@@ -59,6 +62,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await saveSession(t);
   }, []);
 
+  const signInWithPassword = useCallback(async (phoneNumber: string, password: string) => {
+    const t = await api<TokenResponse>("/auth/password/login", {
+      method: "POST",
+      body: { phoneNumber, password, deviceName: `FreshMart ${Platform.OS}` },
+    });
+    await saveSession(t);
+  }, []);
+
+  const resetPassword = useCallback(async (phoneNumber: string, otp: string, password: string) => {
+    const t = await api<TokenResponse>("/auth/password/reset", {
+      method: "POST",
+      body: { phoneNumber, otp, password, deviceName: `FreshMart ${Platform.OS}` },
+    });
+    await saveSession(t);
+  }, []);
+
   const signOut = useCallback(async () => {
     const refreshToken = await getRefreshToken();
     // Always clear locally, even if the server call fails (e.g. offline).
@@ -72,8 +91,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ status, user, requestCode, verifyCode, signOut, deleteAccount }),
-    [status, user, requestCode, verifyCode, signOut, deleteAccount],
+    () => ({ status, user, requestCode, verifyCode, signInWithPassword, resetPassword, signOut, deleteAccount }),
+    [status, user, requestCode, verifyCode, signInWithPassword, resetPassword, signOut, deleteAccount],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
