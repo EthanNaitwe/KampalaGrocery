@@ -32,16 +32,16 @@ function RootStack() {
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="product/[id]" options={{ title: "" }} />
+      <Stack.Screen name="help" options={{ title: "Help & support" }} />
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="checkout" options={{ title: "Checkout" }} />
         <Stack.Screen name="address/new" options={{ title: "New address", presentation: "modal" }} />
-        <Stack.Screen name="orders/index" options={{ title: "My orders" }} />
         <Stack.Screen name="orders/[id]" options={{ title: "Order" }} />
         <Stack.Screen name="report" options={{ title: "Report a problem", presentation: "modal" }} />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="sign-in" options={{ title: "Sign in", presentation: "modal" }} />
-        <Stack.Screen name="verify" options={{ title: "Verify" }} />
+        <Stack.Screen name="verify" options={{ title: "Verify", presentation: "modal" }} />
       </Stack.Protected>
     </Stack>
   );

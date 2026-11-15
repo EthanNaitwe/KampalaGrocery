@@ -13,6 +13,38 @@ const REFRESH_KEY = "freshmart.refreshToken";
 const USER_KEY = "freshmart.user";
 const EXPIRY_SKEW_MS = 30_000;
 
+/**
+ * Secure storage that never throws. Android's keystore can fail on some devices and emulators
+ * (e.g. after an OS update the stored key can't be decrypted). A failed read clears the entry and
+ * behaves as "nothing stored"; a failed write keeps the value in memory for this app session.
+ */
+const memory = new Map<string, string>();
+const store = {
+  async get(key: string): Promise<string | null> {
+    if (memory.has(key)) return memory.get(key)!;
+    try {
+      return await SecureStore.getItemAsync(key);
+    } catch (e) {
+      console.warn(`Secure storage read failed for ${key}; clearing it.`, (e as Error).message);
+      await SecureStore.deleteItemAsync(key).catch(() => {});
+      return null;
+    }
+  },
+  async set(key: string, value: string) {
+    try {
+      await SecureStore.setItemAsync(key, value);
+      memory.delete(key);
+    } catch (e) {
+      console.warn(`Secure storage write failed for ${key}; keeping it in memory only.`, (e as Error).message);
+      memory.set(key, value);
+    }
+  },
+  async remove(key: string) {
+    memory.delete(key);
+    await SecureStore.deleteItemAsync(key).catch(() => {});
+  },
+};
+
 let accessToken: string | null = null;
 let accessExpiresAt = 0;
 let refreshing: Promise<TokenResponse | null> | null = null;
@@ -28,28 +60,25 @@ const emit = (user: UserResponse | null) => listeners.forEach((fn) => fn(user));
 export async function saveSession(t: TokenResponse) {
   accessToken = t.accessToken;
   accessExpiresAt = Date.now() + t.expiresIn * 1000;
-  await SecureStore.setItemAsync(REFRESH_KEY, t.refreshToken);
+  await store.set(REFRESH_KEY, t.refreshToken);
   await saveUser(t.user);
 }
 
 export async function saveUser(user: UserResponse) {
-  await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
+  await store.set(USER_KEY, JSON.stringify(user));
   emit(user);
 }
 
 export async function clearSession() {
   accessToken = null;
   accessExpiresAt = 0;
-  await SecureStore.deleteItemAsync(REFRESH_KEY);
-  await SecureStore.deleteItemAsync(USER_KEY);
+  await store.remove(REFRESH_KEY);
+  await store.remove(USER_KEY);
   emit(null);
 }
 
 export async function loadCachedUser(): Promise<UserResponse | null> {
-  const [token, user] = await Promise.all([
-    SecureStore.getItemAsync(REFRESH_KEY),
-    SecureStore.getItemAsync(USER_KEY),
-  ]);
+  const [token, user] = await Promise.all([store.get(REFRESH_KEY), store.get(USER_KEY)]);
   if (!token || !user) return null;
   try {
     return JSON.parse(user) as UserResponse;
@@ -58,7 +87,7 @@ export async function loadCachedUser(): Promise<UserResponse | null> {
   }
 }
 
-export const getRefreshToken = () => SecureStore.getItemAsync(REFRESH_KEY);
+export const getRefreshToken = () => store.get(REFRESH_KEY);
 
 /**
  * Returns new tokens, or null if the session is definitively over (server said 401).
@@ -67,7 +96,7 @@ export const getRefreshToken = () => SecureStore.getItemAsync(REFRESH_KEY);
 export function refreshSession(): Promise<TokenResponse | null> {
   refreshing ??= (async () => {
     try {
-      const refreshToken = await SecureStore.getItemAsync(REFRESH_KEY);
+      const refreshToken = await store.get(REFRESH_KEY);
       if (!refreshToken) return null;
       const t = await api<TokenResponse>("/auth/refresh", { method: "POST", body: { refreshToken } });
       await saveSession(t);

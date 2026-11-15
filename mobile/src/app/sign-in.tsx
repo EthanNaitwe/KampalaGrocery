@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Text } from "react-native";
+import { BrandMark } from "@/components/BrandMark";
 import { Button, Field, Screen, styles } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
@@ -31,6 +32,7 @@ export default function SignInScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <Screen>
+        <BrandMark />
         <Text style={styles.title} accessibilityRole="header">Sign in to FreshMart</Text>
         <Text style={styles.body}>We'll text you a 6-digit code to confirm your number.</Text>
         <Field

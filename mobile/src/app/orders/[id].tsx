@@ -8,7 +8,7 @@ import { errorMessage } from "@/lib/errors";
 import { formatDateTime, formatSlotDate, statusLabel, statusSteps } from "@/lib/orders";
 import { useCancelOrder, useOrder, useOrderIssues } from "@/lib/queries";
 import { SupportContacts } from "@/components/SupportContacts";
-import { colors, formatUGX, spacing } from "@/lib/theme";
+import { colors, formatUGX, radius, shadow, spacing } from "@/lib/theme";
 
 export default function OrderScreen() {
   const { id, placed } = useLocalSearchParams<{ id: string; placed?: string }>();
@@ -45,7 +45,7 @@ export default function OrderScreen() {
         refreshControl={<RefreshControl refreshing={order.isRefetching} onRefresh={() => void order.refetch()} tintColor={colors.primary} />}
       >
         {placed === "1" && !cancelled && (
-          <View style={[s.card, { backgroundColor: "#f0fdf4", borderColor: colors.primary, alignItems: "center" }]} accessibilityLiveRegion="polite">
+          <View style={[s.card, { backgroundColor: colors.primarySoft, borderColor: colors.primary, alignItems: "center" }]} accessibilityLiveRegion="polite">
             <Ionicons name="checkmark-circle" size={40} color={colors.primary} />
             <Text style={[styles.title, { fontSize: 20 }]}>Order placed</Text>
             <Text style={[styles.body, { textAlign: "center" }]}>We'll text you as it progresses. Pay cash when it arrives.</Text>
@@ -88,8 +88,17 @@ export default function OrderScreen() {
           ))}
           <View style={{ height: 1, backgroundColor: colors.border }} />
           {o.subtotal != null && <Line label="Items" value={formatUGX(o.subtotal)} />}
-          {o.deliveryFee != null && <Line label="Delivery" value={formatUGX(o.deliveryFee)} />}
-          <Line label="Total" value={formatUGX(o.total)} bold />
+          {o.transportStatus === "to_agree" ? (
+            <Line label="Transport" value="We'll call you to agree" />
+          ) : (
+            o.deliveryFee != null && <Line label="Transport" value={formatUGX(o.deliveryFee)} />
+          )}
+          <Line label={o.transportStatus === "to_agree" ? "Items total so far" : "Total"} value={formatUGX(o.total)} bold />
+          {o.transportStatus === "to_agree" && !cancelled && (
+            <Text style={[styles.body, { fontSize: 13 }]}>
+              FreshMart will call {o.customerPhone ?? "you"} to agree the transport fee. You'll get a text with the final total.
+            </Text>
+          )}
           <Text style={[styles.body, { fontSize: 13 }]}>
             Cash on delivery · {o.paymentStatus === "paid" ? "Paid" : o.paymentStatus === "void" ? "Not charged" : "Pay on arrival"}
           </Text>
@@ -101,8 +110,8 @@ export default function OrderScreen() {
             {issues.data.map((i) => (
               <View key={i.id} style={{ gap: 2 }}>
                 <Text style={{ color: colors.text, fontWeight: "600" }}>
-                  {issueCategoryLabels[i.category as keyof typeof issueCategoryLabels] ?? i.category} �{" "}
-                  <Text style={{ color: i.status === "resolved" ? colors.primary : "#b45309" }}>
+                  {issueCategoryLabels[i.category as keyof typeof issueCategoryLabels] ?? i.category} ·{" "}
+                  <Text style={{ color: i.status === "resolved" ? colors.primary : colors.warning }}>
                     {i.status === "resolved" ? "Resolved" : "We're on it"}
                   </Text>
                 </Text>
@@ -141,7 +150,7 @@ function Line({ label, value, bold }: { label: string; value: string; bold?: boo
 }
 
 const s = StyleSheet.create({
-  card: { gap: spacing.sm, padding: spacing.md, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  card: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.surface, ...shadow },
   h: { fontSize: 17, fontWeight: "700", color: colors.text },
   row: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md },
 });

@@ -1,12 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Link } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { ProductImage } from "@/components/ProductImage";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { CategoryBubbles } from "@/components/CategoryBubbles";
+import { ProductCard } from "@/components/ProductCard";
 import { EmptyState, ErrorState, Loading } from "@/components/States";
 import { useCategories, useProducts } from "@/lib/queries";
-import { stockLabel } from "@/lib/stock";
-import { colors, formatUGX, spacing } from "@/lib/theme";
+import { colors, radius, spacing } from "@/lib/theme";
 
 function useDebounced<T>(value: T, ms = 300) {
   const [v, setV] = useState(value);
@@ -17,17 +17,29 @@ function useDebounced<T>(value: T, ms = 300) {
   return v;
 }
 
+/** Full catalogue: search, category filter and the product grid. Home links here with ?category=. */
 export default function ShopScreen() {
+  const params = useLocalSearchParams<{ category?: string }>();
+  const { width } = useWindowDimensions();
   const [query, setQuery] = useState("");
-  const [categoryId, setCategoryId] = useState<number | undefined>();
+  const [categoryId, setCategoryId] = useState<number | undefined>(params.category ? Number(params.category) : undefined);
   const search = useDebounced(query.trim());
 
-  const categories = useCategories();
-  // The API applies search across all categories; the category filter applies when not searching.
-  const products = useProducts(search ? { search } : { categoryId });
+  // A category chosen on Home arrives as a param; follow it each time it changes.
+  useEffect(() => {
+    if (params.category !== undefined) {
+      setCategoryId(params.category ? Number(params.category) : undefined);
+      setQuery("");
+    }
+  }, [params.category]);
 
-  return (
-    <View style={{ flex: 1 }}>
+  const categories = useCategories();
+  // The API searches across all categories; the category filter applies when not searching.
+  const products = useProducts(search ? { search } : { categoryId });
+  const cardWidth = (Math.min(width, 640) - spacing.md * 3) / 2;
+
+  const header = (
+    <View style={{ gap: spacing.md, paddingBottom: spacing.sm }}>
       <View style={s.searchBox}>
         <Ionicons name="search" size={18} color={colors.muted} />
         <TextInput
@@ -39,7 +51,6 @@ export default function ShopScreen() {
           returnKeyType="search"
           autoCorrect={false}
           accessibilityLabel="Search groceries"
-          clearButtonMode="while-editing"
         />
         {!!query && (
           <Pressable onPress={() => setQuery("")} hitSlop={8} accessibilityLabel="Clear search">
@@ -47,117 +58,54 @@ export default function ShopScreen() {
           </Pressable>
         )}
       </View>
-
       {!search && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips} style={{ flexGrow: 0 }}>
-          {[{ id: undefined, name: "All", icon: null }, ...(categories.data ?? [])].map((c) => {
-            const active = c.id === categoryId;
-            return (
-              <Pressable
-                key={c.id ?? "all"}
-                onPress={() => setCategoryId(c.id)}
-                style={[s.chip, active && s.chipActive]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-              >
-                <Text style={[s.chipText, active && { color: "#fff" }]}>
-                  {c.icon ? `${c.icon} ` : ""}
-                  {c.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        <View style={{ marginHorizontal: -spacing.md }}>
+          <CategoryBubbles categories={categories.data ?? []} selected={categoryId} onSelect={setCategoryId} />
+        </View>
       )}
-
-      {products.isLoading ? (
-        <Loading label="Loading products" />
-      ) : products.error && !products.data ? (
-        <ErrorState error={products.error} onRetry={() => void products.refetch()} />
-      ) : (
-        <FlatList
-          data={products.data}
-          keyExtractor={(p) => String(p.id)}
-          contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, flexGrow: 1 }}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              refreshing={products.isRefetching}
-              onRefresh={() => void Promise.all([products.refetch(), categories.refetch()])}
-              tintColor={colors.primary}
-            />
-          }
-          ListEmptyComponent={
-            <EmptyState
-              title={search ? "No matches" : "Nothing here yet"}
-              body={search ? `We couldn't find "${search}". Try another word.` : "Check back soon."}
-            />
-          }
-          renderItem={({ item }) => {
-            const stock = stockLabel(item);
-            return (
-            <Link href={{ pathname: "/product/[id]", params: { id: String(item.id) } }} asChild>
-              <Pressable
-                style={({ pressed }) => [s.card, pressed && { opacity: 0.7 }]}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.name}, ${formatUGX(item.price)}${stock ? `, ${stock.text}` : ""}`}
-              >
-                <ProductImage uri={item.image} size={72} />
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={s.name} numberOfLines={2}>{item.name}</Text>
-                  {!!item.description && <Text style={s.desc} numberOfLines={1}>{item.description}</Text>}
-                  <Text style={s.price}>{formatUGX(item.price)}</Text>
-                  {!!stock && <Text style={stock.out ? s.out : s.low}>{stock.text}</Text>}
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
-              </Pressable>
-            </Link>
-            );
-          }}
-        />
-      )}
+      {!!search && <Text style={s.section}>Results for "{search}"</Text>}
     </View>
+  );
+
+  if (products.isLoading) return <View style={{ padding: spacing.md, flex: 1 }}>{header}<Loading label="Loading products" /></View>;
+  if (products.error && !products.data) {
+    return <View style={{ padding: spacing.md, flex: 1 }}>{header}<ErrorState error={products.error} onRetry={() => void products.refetch()} /></View>;
+  }
+
+  return (
+    <FlatList
+      data={products.data}
+      keyExtractor={(p) => String(p.id)}
+      numColumns={2}
+      ListHeaderComponent={header}
+      columnWrapperStyle={{ gap: spacing.md }}
+      contentContainerStyle={{ padding: spacing.md, gap: spacing.md, flexGrow: 1 }}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={
+        <RefreshControl
+          refreshing={products.isRefetching}
+          onRefresh={() => void Promise.all([products.refetch(), categories.refetch()])}
+          tintColor={colors.primary}
+          colors={[colors.primary]}
+        />
+      }
+      ListEmptyComponent={
+        <EmptyState
+          icon="search-outline"
+          title={search ? "No matches" : "Nothing here yet"}
+          body={search ? `We couldn't find "${search}". Try another word.` : "Check back soon."}
+        />
+      }
+      renderItem={({ item }) => <ProductCard product={item} width={cardWidth} />}
+    />
   );
 }
 
 const s = StyleSheet.create({
   searchBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    margin: spacing.md,
-    marginBottom: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md,
+    borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
   },
-  searchInput: { flex: 1, paddingVertical: 10, fontSize: 16, color: colors.text },
-  chips: { paddingHorizontal: spacing.md, gap: spacing.sm, paddingBottom: spacing.xs },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { color: colors.text, fontWeight: "500" },
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    padding: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  name: { fontSize: 16, fontWeight: "600", color: colors.text },
-  desc: { fontSize: 13, color: colors.muted },
-  price: { marginTop: 2, color: colors.primary, fontWeight: "700" },
-  out: { color: colors.danger, fontSize: 13, fontWeight: "600" },
-  low: { color: "#b45309", fontSize: 13, fontWeight: "600" },
+  searchInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: colors.text },
+  section: { fontSize: 17, fontWeight: "700", color: colors.text },
 });

@@ -34,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     (async () => {
-      const cached = await loadCachedUser();
+      const cached = await loadCachedUser().catch(() => null);
       if (!cached) return setStatus("signedOut");
       // Show the cached user immediately (works offline), then validate in the background.
       setUser(cached);

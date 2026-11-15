@@ -59,7 +59,8 @@ export function useProduct(id: number) {
     queryKey: keys.product(id),
     queryFn: () => api<ProductResponse>(`/products/${id}`),
     enabled: Number.isInteger(id) && id > 0,
-    // Show list data instantly while the detail request revalidates.
+    // Show list data instantly, but always revalidate: stock may have changed since the list loaded.
+    staleTime: 0,
     initialData: () =>
       client
         .getQueriesData<ProductResponse[]>({ queryKey: ["products"] })

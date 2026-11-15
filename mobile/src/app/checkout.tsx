@@ -12,7 +12,7 @@ import { errorMessage } from "@/lib/errors";
 import { formatSlotDate } from "@/lib/orders";
 import { keys, useAddresses, useQuote, useSlots } from "@/lib/queries";
 import { authedApi } from "@/lib/session";
-import { colors, formatUGX, spacing } from "@/lib/theme";
+import { colors, formatUGX, radius, shadow, spacing } from "@/lib/theme";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -127,6 +127,9 @@ export default function CheckoutScreen() {
           <Option key={a.id} selected={a.id === addressId} onPress={() => setAddressId(a.id)} label={`${a.label ?? "Address"}, ${a.line}, ${a.zoneName}`}>
             <Text style={s.optTitle}>{a.label || a.zoneName}</Text>
             <Text style={styles.body}>{a.line} · {a.zoneName}</Text>
+            {a.latitude != null && (
+              <Text style={[styles.body, { fontSize: 13, color: colors.primary }]}>Location pinned</Text>
+            )}
             {!!a.instructions && <Text style={[styles.body, { fontSize: 13 }]}>{a.instructions}</Text>}
           </Option>
         ))}
@@ -171,11 +174,13 @@ export default function CheckoutScreen() {
         </Option>
       </Section>
 
-      <Field label="Notes for the rider (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. call on arrival" maxLength={1000} multiline />
+      <Section title="Notes for the rider">
+        <Field label="Optional" value={notes} onChangeText={setNotes} placeholder="e.g. call on arrival" maxLength={1000} multiline />
+      </Section>
 
       <Section title="Summary">
         {!addressId ? (
-          <Text style={styles.body}>Add an address to see the delivery fee.</Text>
+          <Text style={styles.body}>Add an address to see your total.</Text>
         ) : quote.isLoading ? (
           <Loading label="Calculating total" />
         ) : quote.error ? (
@@ -183,9 +188,16 @@ export default function CheckoutScreen() {
         ) : quote.data ? (
           <View style={{ gap: spacing.xs }}>
             <Row label={`Items (${quote.data.itemCount})`} value={formatUGX(quote.data.subtotal)} />
-            <Row label="Delivery" value={formatUGX(quote.data.deliveryFee)} />
+            <Row label="Transport" value="Agreed by phone" />
             <View style={{ height: 1, backgroundColor: colors.border, marginVertical: spacing.xs }} />
-            <Row label="Total" value={formatUGX(quote.data.total)} bold />
+            <Row label="Items total" value={formatUGX(quote.data.total)} bold />
+            <View style={s.note}>
+              <Ionicons name="call-outline" size={18} color={colors.primary} />
+              <Text style={[styles.body, { flex: 1, fontSize: 13 }]}>
+                After you order, FreshMart will call you to agree the transport fee. You'll get a text with the final total
+                before the rider leaves. Pay cash on delivery.
+              </Text>
+            </View>
             {issues.map((i) => (
               <Text key={i.code} style={styles.error}>{i.message}</Text>
             ))}
@@ -195,7 +207,7 @@ export default function CheckoutScreen() {
 
       {!!error && <Text style={styles.error} accessibilityLiveRegion="assertive">{error}</Text>}
       <Button
-        title={quote.data ? `Place order · ${formatUGX(quote.data.total)}` : "Place order"}
+        title={quote.data ? `Place order · ${formatUGX(quote.data.total)} + transport` : "Place order"}
         onPress={place}
         loading={placing}
         disabled={!canPlace}
@@ -215,12 +227,16 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
 }
 
 const s = StyleSheet.create({
-  section: { gap: spacing.sm, padding: spacing.md, backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
+  section: { gap: spacing.sm, padding: spacing.md, backgroundColor: colors.surface, borderRadius: radius.lg, ...shadow },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: colors.text },
-  option: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start", padding: spacing.md, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
-  optionSelected: { borderColor: colors.primary, backgroundColor: "#f0fdf4" },
+  option: {
+    flexDirection: "row", gap: spacing.md, alignItems: "flex-start", padding: spacing.md,
+    borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  optionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   optTitle: { fontSize: 15, fontWeight: "600", color: colors.text },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border },
-  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { color: colors.text, fontWeight: "500" },
+  chip: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: colors.background },
+  chipActive: { backgroundColor: colors.primary },
+  chipText: { color: colors.text, fontWeight: "600" },
+  note: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start", backgroundColor: colors.primarySoft, borderRadius: radius.md, padding: spacing.sm, marginTop: spacing.xs },
 });

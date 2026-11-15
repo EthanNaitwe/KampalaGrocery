@@ -28,7 +28,13 @@
       "expo-status-bar",
       "expo-secure-store",
       "expo-image",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "FreshMart uses your location to pin your delivery address so the rider can find you."
+        }
+      ]
     ],
     "scheme": "freshmart",
     "experiments": {

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
-import { colors, spacing } from "@/lib/theme";
+import { colors, radius, spacing } from "@/lib/theme";
 
 export function Button({
   title,
@@ -59,29 +59,29 @@ export function Screen({ children }: { children: ReactNode }) {
 
 export const styles = StyleSheet.create({
   screen: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.background },
-  title: { fontSize: 24, fontWeight: "700", color: colors.text },
+  title: { fontSize: 24, fontWeight: "700", color: colors.text, letterSpacing: -0.3 },
   body: { fontSize: 15, color: colors.muted, lineHeight: 21 },
   label: { fontSize: 14, fontWeight: "600", color: colors.text },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: 13,
     fontSize: 17,
     backgroundColor: colors.surface,
     color: colors.text,
   },
   error: { color: colors.danger, fontSize: 14 },
   button: {
-    minHeight: 48,
-    borderRadius: 10,
+    minHeight: 50,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.primary,
   },
-  secondary: { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.primary },
+  secondary: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   dangerButton: { backgroundColor: colors.danger },
-  buttonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  buttonText: { color: colors.onPrimary, fontWeight: "600", fontSize: 16 },
 });
