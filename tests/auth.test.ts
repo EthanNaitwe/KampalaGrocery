@@ -206,7 +206,6 @@ describe("Authorization", () => {
     await request(app).post(`${V1}/cart`).set(bearer(s.accessToken)).send({ productId, quantity: 2 }).expect(201);
     const { rows } = await pool.query("select price from products where id = $1", [productId]);
     const addressId = await addAddress(bearer(s.accessToken));
-    const fee = (await pool.query("select fee from addresses a join delivery_zones z on z.id = a.zone_id where a.id = $1", [addressId])).rows[0].fee;
     const order = await placeOrder(bearer(s.accessToken), {
       addressId,
       ...(await openSlot()),
@@ -214,7 +213,9 @@ describe("Authorization", () => {
     });
     expect(order.status).toBe(201);
     expect(Number(order.body.subtotal)).toBe(Number(rows[0].price) * 2);
-    expect(Number(order.body.total)).toBe(Number(rows[0].price) * 2 + Number(fee));
+    // Transport is agreed later, so at checkout the total is the items only.
+    expect(Number(order.body.total)).toBe(Number(rows[0].price) * 2);
+    expect(order.body.deliveryFee).toBeNull();
   });
 });
 

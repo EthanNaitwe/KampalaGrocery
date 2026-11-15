@@ -20,6 +20,10 @@ export default function Dashboard() {
   if (error || !data) return <p className="text-destructive">{(error as Error)?.message ?? "Failed to load"}</p>;
 
   const alerts = [
+    data.transportToAgree > 0 && {
+      icon: AlertTriangle, href: "/orders", tone: "text-amber-700",
+      text: `${data.transportToAgree} order${data.transportToAgree > 1 ? "s" : ""} waiting for a transport fee to be agreed with the customer.`,
+    },
     data.failedNotifications > 0 && {
       icon: MessageSquareWarning, href: "/orders?status=all", tone: "text-destructive",
       text: `${data.failedNotifications} customer text${data.failedNotifications > 1 ? "s" : ""} failed in the last 7 days. Open the order to resend.`,

@@ -147,7 +147,6 @@ async function loadAddress(x: Exec, userId: string, addressId: number) {
 
 function price(cart: Awaited<ReturnType<typeof loadCart>>, zone: typeof deliveryZones.$inferSelect): QuoteResponse {
   const subtotal = cart.reduce((s, i) => s + cents(i.price) * i.quantity, 0);
-  const fee = cents(zone.fee);
   const issues: QuoteResponse["issues"] = [];
   if (cart.length === 0) issues.push({ code: "EMPTY_CART", message: "Your cart is empty" });
   const short = shortagesOf(cart);
@@ -158,8 +157,10 @@ function price(cart: Awaited<ReturnType<typeof loadCart>>, zone: typeof delivery
   }
   return {
     subtotal: money(subtotal),
-    deliveryFee: money(fee),
-    total: money(subtotal + fee),
+    // Transport is agreed with the customer after ordering (staff record it in the console).
+    deliveryFee: null,
+    total: money(subtotal),
+    transport: "to_agree",
     minOrder: money(cents(zone.minOrder)),
     itemCount: cart.reduce((n, i) => n + i.quantity, 0),
     issues,
@@ -234,13 +235,16 @@ export async function placeOrder(user: User, body: PlaceOrderBody, key: string):
           userId: user.id,
           status: "pending",
           subtotal: q.subtotal,
-          deliveryFee: q.deliveryFee,
+          deliveryFee: null,
           total: q.total,
+          transportStatus: "to_agree",
           customerName: body.customerName || [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
           customerPhone: address.contactPhone || (user.phoneNumber.includes("@") ? null : user.phoneNumber),
           customerEmail: user.phoneNumber.includes("@") ? user.phoneNumber : null,
           deliveryAddress: [address.label, address.line].filter(Boolean).join(" - "),
           deliveryInstructions: address.instructions,
+          deliveryLatitude: address.latitude,
+          deliveryLongitude: address.longitude,
           deliveryZoneId: zone.id,
           deliveryZoneName: zone.name,
           slotId: body.slotId,
@@ -284,6 +288,9 @@ async function transition(orderId: number, actor: User, to: OrderStatus, guard: 
     if (!orderTransitions[from]?.includes(to)) {
       throw new HttpError("CONFLICT", `Order can't move from ${from} to ${to}`);
     }
+    if (to === "out_for_delivery" && o.transportStatus === "to_agree") {
+      throw new HttpError("CONFLICT", "Agree the transport fee with the customer before dispatching");
+    }
     const paymentStatus =
       o.paymentMethod === "cod" ? (to === "delivered" ? "paid" : to === "cancelled" ? "void" : o.paymentStatus) : o.paymentStatus;
     const [updated] = await tx
@@ -322,4 +329,29 @@ export async function listOrderEvents(orderId: number) {
     .from(orderEvents)
     .where(eq(orderEvents.orderId, orderId))
     .orderBy(asc(orderEvents.id));
+}
+
+/**
+ * Staff record the transport fee agreed with the customer. Allowed until the order leaves
+ * (it can be corrected before dispatch). Total becomes items + transport.
+ */
+export async function agreeTransport(admin: User, orderId: number, fee: string, note?: string) {
+  return db.transaction(async (tx) => {
+    const [o] = await tx.select().from(orders).where(eq(orders.id, orderId)).for("update");
+    if (!o) throw new HttpError("NOT_FOUND", "Order not found");
+    if (!["pending", "confirmed", "preparing"].includes(o.status ?? "pending")) {
+      throw new HttpError("CONFLICT", "Transport can only be set before the order is dispatched");
+    }
+    const subtotal = cents(o.subtotal ?? o.total);
+    const [updated] = await tx
+      .update(orders)
+      .set({ deliveryFee: money(cents(fee)), total: money(subtotal + cents(fee)), transportStatus: "agreed", updatedAt: new Date() })
+      .where(eq(orders.id, orderId))
+      .returning();
+    await tx.insert(orderEvents).values({
+      orderId, fromStatus: o.status, toStatus: o.status ?? "pending", actorUserId: admin.id,
+      note: `Transport agreed: UGX ${Math.round(Number(fee)).toLocaleString("en-US")}${note ? ` (${note})` : ""}`,
+    });
+    return updated;
+  });
 }

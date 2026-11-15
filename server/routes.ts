@@ -32,6 +32,7 @@ import {
   slotBody,
   slotPatchBody,
   resolveIssueBody,
+  agreeTransportBody,
   type SupportInfo,
 } from "../shared/api.js";
 import { notifyOrder, resendNotification, templateForStatus } from "./notify.js";
@@ -55,6 +56,7 @@ import {
   cancelByCustomer,
   changeStatusByAdmin,
   listOrderEvents,
+  agreeTransport,
 } from "./checkout.js";
 import { HttpError, errorMiddleware, handle, parse, requireAdmin, sendError } from "./http.js";
 
@@ -148,64 +150,6 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.status(204).send();
   }));
 
-  const googleRedirectUri = () =>
-    process.env.GOOGLE_REDIRECT_URI || "http://localhost:5000/api/auth/google/callback";
-
-  r.get("/auth/google", (_req, res) => {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    if (!clientId) return sendError(res, "SERVICE_UNAVAILABLE", "Google OAuth is not configured");
-    const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: googleRedirectUri(),
-      response_type: "code",
-      scope: "openid email profile",
-      access_type: "offline",
-      prompt: "consent",
-    });
-    res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
-  });
-
-  r.get("/auth/google/callback", handle(async (req, res) => {
-    const code = req.query.code as string | undefined;
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    if (!clientId || !clientSecret) throw new HttpError("SERVICE_UNAVAILABLE", "Google OAuth is not configured");
-    if (!code) throw new HttpError("VALIDATION_ERROR", "Missing OAuth code");
-
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: googleRedirectUri(),
-        grant_type: "authorization_code",
-      }),
-    });
-    if (!tokenResponse.ok) throw new HttpError("UNAUTHORIZED", "Google sign-in failed");
-    const tokenData = (await tokenResponse.json()) as { access_token?: string };
-
-    const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
-    });
-    if (!userInfoResponse.ok) throw new HttpError("UNAUTHORIZED", "Google sign-in failed");
-    const info = (await userInfoResponse.json()) as {
-      email?: string; given_name?: string; family_name?: string; name?: string;
-    };
-    if (!info.email) throw new HttpError("UNAUTHORIZED", "Google account has no email");
-
-    const user = await storage.upsertUser({
-      id: info.email,
-      phoneNumber: info.email,
-      firstName: info.given_name || info.name?.split(" ")[0] || "Google",
-      lastName: info.family_name || "",
-    });
-
-    await startWebSession(req, user);
-    res.redirect("/");
-  }));
-
   // Logged-out responds 200 with a message (existing web-client contract).
   r.get("/auth/user", handle(async (req, res) => {
     const userId = req.session?.userId;
@@ -259,7 +203,15 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   r.delete("/products/:id", isAuthenticated, requireAdmin, handle(async (req, res) => {
     const { id } = parse(idParam, req.params);
     if (!(await storage.getProduct(id))) throw new HttpError("NOT_FOUND", "Product not found");
-    await storage.deleteProduct(id);
+    try {
+      await storage.deleteProduct(id);
+    } catch (e: any) {
+      // Referenced by orders, carts or the stock ledger: history must be kept.
+      if (e?.code === "23503") {
+        throw new HttpError("CONFLICT", "This product has order or stock history. Switch it off sale instead of deleting it.");
+      }
+      throw e;
+    }
     res.status(204).send();
   }));
 
@@ -339,7 +291,8 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
 
   // ---- Orders -------------------------------------------------------------
   r.get("/orders", isAuthenticated, handle(async (req, res) => {
-    res.json(req.user.isAdmin ? await storage.getOrders() : await storage.getUserOrders(req.user.id));
+    // Always the caller's own orders, staff included. The staff queue is /admin/orders.
+    res.json(await storage.getUserOrders(req.user.id));
   }));
 
   r.get("/orders/:id", isAuthenticated, handle(async (req, res) => {
@@ -422,6 +375,12 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   admin.patch("/orders/:id", handle(async (req, res) => {
     const { assignedRider } = parse(adminOrderPatchBody, req.body);
     res.json(await assignRider(parse(idParam, req.params).id, assignedRider || null, req.user));
+  }));
+  admin.post("/orders/:id/transport", handle(async (req, res) => {
+    const { fee, note } = parse(agreeTransportBody, req.body);
+    const order = await agreeTransport(req.user, parse(idParam, req.params).id, fee, note);
+    await notifyOrder(order, "order_transport_agreed");
+    res.json(order);
   }));
   admin.post("/notifications/:id/resend", handle(async (req, res) => res.json(await resendNotification(parse(idParam, req.params).id))));
   admin.get("/delivery/zones", handle(async (_req, res) => res.json(await listAllZones())));

@@ -98,14 +98,15 @@ describe("Addresses", () => {
 });
 
 describe("Checkout", () => {
-  it("quotes subtotal + delivery fee from the database", async () => {
+  it("quotes the items from the database; transport is agreed later", async () => {
     const a = await signIn();
     await fillCart(a.h, 3);
     const addressId = await addAddress(a.h);
     const q = (await request(app).post(`${V1}/checkout/quote`).set(a.h).send({ addressId }).expect(200)).body;
     expect(Number(q.subtotal)).toBe(price * 3);
-    expect(Number(q.deliveryFee)).toBe(5000);
-    expect(Number(q.total)).toBe(price * 3 + 5000);
+    expect(q.deliveryFee).toBeNull();
+    expect(q.transport).toBe("to_agree");
+    expect(Number(q.total)).toBe(price * 3);
     expect(q.issues).toEqual([]);
   });
 
@@ -127,12 +128,15 @@ describe("Checkout", () => {
       slotDate: slot.slotDate,
       notes: "Ring twice",
     });
-    expect(Number(o.total)).toBe(price * 2 + 5000);
+    expect(Number(o.total)).toBe(price * 2);
+    expect(o).toMatchObject({ deliveryFee: null, transportStatus: "to_agree" });
     expect((await request(app).get(`${V1}/cart`).set(a.h)).body).toHaveLength(0);
 
     const detail = (await request(app).get(`${V1}/orders/${o.id}`).set(a.h).expect(200)).body;
     expect(detail.orderItems).toHaveLength(1);
-    expect(detail.events.map((e: { toStatus: string }) => e.toStatus)).toEqual(["pending"]);
+    // Status changes only (notes like "Transport agreed" keep the same status).
+    const changes = detail.events.filter((e: { fromStatus: string | null; toStatus: string }) => e.fromStatus !== e.toStatus);
+    expect(changes.map((e: { toStatus: string }) => e.toStatus)).toEqual(["pending"]);
     const { rows } = await pool.query("select product_name from order_items where order_id = $1", [o.id]);
     expect(rows[0].product_name).toBeTruthy();
   });
@@ -251,7 +255,9 @@ describe("Order lifecycle", () => {
     const set = (status: string) => request(app).put(`${V1}/orders/${orderId}/status`).set(admin.h).send({ status });
 
     expect((await set("delivered")).status).toBe(409); // can't skip steps
-    for (const s of ["confirmed", "preparing", "out_for_delivery"]) expect((await set(s)).status).toBe(200);
+    for (const s of ["confirmed", "preparing"]) expect((await set(s)).status).toBe(200);
+    await request(app).post(`${V1}/admin/orders/${orderId}/transport`).set(admin.h).send({ fee: 5000 }).expect(200);
+    expect((await set("out_for_delivery")).status).toBe(200);
     // Once confirmed, the customer can no longer cancel in-app.
     expect((await request(app).post(`${V1}/orders/${orderId}/cancel`).set(u.h)).status).toBe(409);
     const delivered = await set("delivered");
@@ -260,10 +266,12 @@ describe("Order lifecycle", () => {
     expect((await set("cancelled")).status).toBe(409); // terminal
 
     const detail = (await request(app).get(`${V1}/orders/${orderId}`).set(u.h)).body;
-    expect(detail.events.map((e: { toStatus: string }) => e.toStatus)).toEqual([
+    // Status changes only (notes like "Transport agreed" keep the same status).
+    const changes = detail.events.filter((e: { fromStatus: string | null; toStatus: string }) => e.fromStatus !== e.toStatus);
+    expect(changes.map((e: { toStatus: string }) => e.toStatus)).toEqual([
       "pending", "confirmed", "preparing", "out_for_delivery", "delivered",
     ]);
     const { rows } = await pool.query("select count(*) from order_events where order_id = $1 and actor_user_id = $2", [orderId, admin.userId]);
-    expect(Number(rows[0].count)).toBe(4);
+    expect(Number(rows[0].count)).toBe(5); // 4 status changes + transport agreed
   });
 });

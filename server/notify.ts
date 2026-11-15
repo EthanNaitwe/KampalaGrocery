@@ -8,7 +8,13 @@ import { notifications, type Order } from "../shared/schema.js";
 import { isSmsRecipient, sendSms, smsConfigured } from "./sms.js";
 import { HttpError } from "./http.js";
 
-export type OrderTemplate = "order_placed" | "order_confirmed" | "order_out_for_delivery" | "order_delivered" | "order_cancelled";
+export type OrderTemplate =
+  | "order_placed"
+  | "order_transport_agreed"
+  | "order_confirmed"
+  | "order_out_for_delivery"
+  | "order_delivered"
+  | "order_cancelled";
 
 /** Status changes that text the customer. 'preparing' is internal and stays quiet. */
 export const templateForStatus: Partial<Record<string, OrderTemplate>> = {
@@ -31,7 +37,9 @@ export function renderOrderMessage(template: OrderTemplate, o: Order): string {
   const ref = `order #${o.id}`;
   switch (template) {
     case "order_placed":
-      return `FreshMart: we've received ${ref} (${ugx(o.total)}, cash on delivery). Delivery: ${formatSlot(o)}. We'll text you when it's on the way.`;
+      return `FreshMart: we've received ${ref} (items ${ugx(o.subtotal ?? o.total)}, cash on delivery). Delivery: ${formatSlot(o)}. We'll call you to agree the transport fee.`;
+    case "order_transport_agreed":
+      return `FreshMart: transport for ${ref} is ${ugx(o.deliveryFee)}. Total to pay on delivery: ${ugx(o.total)}.`;
     case "order_confirmed":
       return `FreshMart: ${ref} is confirmed for ${formatSlot(o)}.`;
     case "order_out_for_delivery":

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "wouter";
-import { RefreshCw, Send, Search } from "lucide-react";
+import { MapPin, RefreshCw, Send, Search } from "lucide-react";
 import { orderTransitions, type AdminOrderDetail, type AdminOrdersResponse, type OrderStatus } from "@shared/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ const tabs: Array<{ value: string; label: string }> = [
 
 function StatusBadge({ status }: { status: string | null }) {
   const meta = statusMeta[(status ?? "pending") as OrderStatus];
-  return <Badge className={`${meta?.badge ?? ""} hover:${meta?.badge ?? ""} font-medium`}>{statusLabel(status)}</Badge>;
+  return <Badge variant="outline" className={`${meta?.badge ?? ""} border-transparent font-medium`}>{statusLabel(status)}</Badge>;
 }
 
 export default function Orders() {
@@ -149,7 +149,10 @@ export default function Orders() {
                   </TableCell>
                   <TableCell>{o.deliveryZoneName ?? "—"}</TableCell>
                   <TableCell className="text-right">{o.itemCount}</TableCell>
-                  <TableCell className="text-right whitespace-nowrap">{ugx(o.total)}</TableCell>
+                  <TableCell className="text-right whitespace-nowrap">
+                    {ugx(o.total)}
+                    {o.transportStatus === "to_agree" && <div className="text-xs text-destructive">+ transport to agree</div>}
+                  </TableCell>
                   <TableCell><StatusBadge status={o.status} /></TableCell>
                   <TableCell className="text-sm">{o.assignedRider ?? <span className="text-muted-foreground">—</span>}</TableCell>
                 </TableRow>
@@ -208,6 +211,16 @@ function OrderSheet({ id, onClose }: { id: number | null; onClose: () => void })
     },
     onError,
   });
+  const [fee, setFee] = useState<string | null>(null);
+  const transport = useMutation({
+    mutationFn: (amount: string) => api(`/admin/orders/${id}/transport`, { method: "POST", body: { fee: amount } }),
+    onSuccess: () => {
+      setFee(null);
+      refresh();
+      toast({ title: "Transport agreed", description: "The customer has been sent the new total." });
+    },
+    onError,
+  });
   const resend = useMutation({
     mutationFn: (nid: number) => api<{ status: string; error: string | null }>(`/admin/notifications/${nid}/resend`, { method: "POST" }),
     onSuccess: (n) => {
@@ -244,7 +257,8 @@ function OrderSheet({ id, onClose }: { id: number | null; onClose: () => void })
                     <Button
                       key={s}
                       variant={s === "cancelled" ? "destructive" : "default"}
-                      disabled={move.isPending}
+                      disabled={move.isPending || (s === "out_for_delivery" && o.transportStatus === "to_agree")}
+                      title={s === "out_for_delivery" && o.transportStatus === "to_agree" ? "Agree transport first" : undefined}
                       onClick={() => {
                         if (s === "cancelled" && !confirm(`Cancel order #${id}? Stock is returned and the customer is texted.`)) return;
                         move.mutate(s);
@@ -267,6 +281,63 @@ function OrderSheet({ id, onClose }: { id: number | null; onClose: () => void })
               <div>{o.deliveryAddress} · {o.deliveryZoneName}</div>
               {o.deliveryInstructions && <div className="text-muted-foreground">Directions: {o.deliveryInstructions}</div>}
               {o.notes && <div className="text-muted-foreground">Customer note: {o.notes}</div>}
+              {o.deliveryLatitude != null && o.deliveryLongitude != null && (
+                <a
+                  className="inline-flex items-center gap-1 text-primary font-medium"
+                  href={`https://www.google.com/maps/search/?api=1&query=${o.deliveryLatitude},${o.deliveryLongitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MapPin className="h-4 w-4" /> Open customer's pin in Google Maps
+                </a>
+              )}
+            </section>
+
+            <section className="space-y-2 rounded-md border p-3">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold">Transport</div>
+                {o.transportStatus === "to_agree" ? (
+                  <Badge variant="destructive">To agree</Badge>
+                ) : (
+                  <Badge variant="secondary">Agreed {ugx(o.deliveryFee)}</Badge>
+                )}
+              </div>
+              {["pending", "confirmed", "preparing"].includes(status) ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Call or WhatsApp the customer to agree the transport fee, then record it. They're texted the new total.
+                    {o.zoneGuideFee && ` Guide for ${o.deliveryZoneName}: ${ugx(o.zoneGuideFee)}.`}
+                  </p>
+                  {o.customerPhone && (
+                    <div className="flex gap-3 text-sm">
+                      <a className="text-primary" href={`tel:${o.customerPhone}`}>Call customer</a>
+                      <a className="text-primary" href={`https://wa.me/${o.customerPhone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer">WhatsApp</a>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      inputMode="numeric"
+                      placeholder="Agreed fee (UGX)"
+                      value={fee ?? (o.deliveryFee ? String(Math.round(Number(o.deliveryFee))) : o.zoneGuideFee ? String(Math.round(Number(o.zoneGuideFee))) : "")}
+                      onChange={(e) => setFee(e.target.value)}
+                      className="w-44"
+                    />
+                    <Button
+                      variant="secondary"
+                      disabled={transport.isPending}
+                      onClick={() => {
+                        const v = (fee ?? String(Math.round(Number(o.deliveryFee ?? o.zoneGuideFee ?? 0)))).trim();
+                        if (!/^\d+$/.test(v)) return toast({ title: "Enter the fee in UGX", variant: "destructive" });
+                        transport.mutate(v);
+                      }}
+                    >
+                      {o.transportStatus === "agreed" ? "Update fee" : "Save agreed fee"}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">Locked once the order is dispatched.</p>
+              )}
             </section>
 
             <section className="space-y-2">
@@ -297,7 +368,7 @@ function OrderSheet({ id, onClose }: { id: number | null; onClose: () => void })
               </ul>
               <div className="mt-2 space-y-0.5 text-right">
                 <div>Items {ugx(o.subtotal)}</div>
-                <div>Delivery {ugx(o.deliveryFee)}</div>
+                <div>Transport {o.transportStatus === "to_agree" ? "to agree" : ugx(o.deliveryFee)}</div>
                 <div className="font-bold">Total {ugx(o.total)} · cash on delivery ({o.paymentStatus ?? "unpaid"})</div>
               </div>
             </section>

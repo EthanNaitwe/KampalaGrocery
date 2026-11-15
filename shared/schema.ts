@@ -12,13 +12,13 @@ import {
   uniqueIndex,
   date,
   check,
+  doublePrecision,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations, sql } from "drizzle-orm";
 
-// Session storage table.
-// (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
+// Web (staff console) sessions, used by connect-pg-simple.
 export const sessions = pgTable(
   "sessions",
   {
@@ -183,6 +183,9 @@ export const addresses = pgTable("addresses", {
   line: varchar("line", { length: 300 }).notNull(),
   instructions: varchar("instructions", { length: 500 }),
   contactPhone: varchar("contact_phone", { length: 20 }),
+  /** GPS pin from the customer's phone, when they chose "Use my current location". */
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [index("IDX_addresses_user").on(table.userId)]);
 
@@ -200,6 +203,10 @@ export const orders = pgTable("orders", {
   /** Snapshot of the address text at order time; later address edits don't rewrite it. */
   deliveryAddress: text("delivery_address"),
   deliveryInstructions: text("delivery_instructions"),
+  deliveryLatitude: doublePrecision("delivery_latitude"),
+  deliveryLongitude: doublePrecision("delivery_longitude"),
+  /** Transport is agreed per order: 'to_agree' until staff record the fee, then 'agreed'. */
+  transportStatus: varchar("transport_status", { length: 15 }),
   deliveryZoneId: integer("delivery_zone_id").references(() => deliveryZones.id),
   deliveryZoneName: varchar("delivery_zone_name", { length: 100 }),
   slotId: integer("slot_id").references(() => deliverySlots.id),

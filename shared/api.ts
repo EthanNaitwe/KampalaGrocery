@@ -102,7 +102,8 @@ export const orderTransitions: Record<OrderStatus, OrderStatus[]> = {
   pending: ["confirmed", "cancelled"],
   confirmed: ["preparing", "cancelled"],
   preparing: ["out_for_delivery", "cancelled"],
-  out_for_delivery: ["delivered"],
+  // Cancelling here covers failed deliveries (customer unreachable); stock is returned.
+  out_for_delivery: ["delivered", "cancelled"],
   delivered: [],
   cancelled: [],
 };
@@ -140,6 +141,12 @@ export const createAddressBody = z.object({
   line: z.string().trim().min(3, "Enter the street, building or landmark").max(300),
   instructions: z.string().trim().max(500).optional(),
   contactPhone: z.string().trim().regex(/^\+?[0-9\s()-]{7,20}$/, "Invalid phone number").optional(),
+  /** GPS pin from "Use my current location" (both or neither). */
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+}).refine((v) => (v.latitude === undefined) === (v.longitude === undefined), {
+  message: "Location needs both latitude and longitude",
+  path: ["latitude"],
 });
 export type CreateAddressBody = z.infer<typeof createAddressBody>;
 
@@ -192,10 +199,16 @@ export interface SlotAvailability {
   reason?: "full" | "closed";
 }
 
+/** Transport is agreed with the customer after ordering; until then the fee is null. */
+export type TransportStatus = "to_agree" | "agreed";
+
 export interface QuoteResponse {
   subtotal: string;
-  deliveryFee: string;
+  /** Always null at checkout: transport is agreed with FreshMart after the order is placed. */
+  deliveryFee: string | null;
+  /** Amount known now (items only). Transport is added once agreed. */
   total: string;
+  transport: TransportStatus;
   minOrder: string;
   itemCount: number;
   /** Blocking problems; the order will be refused while any are present. */
@@ -281,8 +294,17 @@ export interface AdminOrdersResponse {
 export interface AdminOrderDetail extends OrderDetailResponse {
   notifications: Notification[];
   issues: SupportIssue[];
+  /** The delivery area's guide fee, to help staff when agreeing transport. */
+  zoneGuideFee: string | null;
 }
+export const agreeTransportBody = z.object({
+  fee: z.union([z.string(), z.number()]).transform(String).pipe(z.string().regex(/^\d{1,8}(\.\d{1,2})?$/, "Invalid amount")),
+  note: z.string().trim().max(500).optional(),
+});
+
 export interface AdminSummary {
+  /** Orders still waiting for a transport fee to be agreed with the customer. */
+  transportToAgree: number;
   awaiting: Record<"pending" | "confirmed" | "preparing" | "out_for_delivery", number>;
   todaySlots: Array<SlotAvailability & { booked: number; capacity: number }>;
   lowStock: Array<Pick<Product, "id" | "name" | "stockQuantity">>;

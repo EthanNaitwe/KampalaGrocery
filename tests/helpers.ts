@@ -86,6 +86,11 @@ export async function cleanupUsers(prefix: string) {
   await pool.query("delete from otp_verifications where phone_number like $1", [`${prefix}%`]);
 }
 
+/** Staff record the transport fee agreed with the customer (required before dispatch). */
+export function agreeTransport(staffH: Record<string, string>, orderId: number, fee: number | string = 5000) {
+  return request(app).post(`${V1}/admin/orders/${orderId}/transport`).set(staffH).send({ fee });
+}
+
 export async function makeAdmin(userId: string) {
   await pool.query("update users set is_admin = true where id = $1", [userId]);
 }

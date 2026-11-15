@@ -12,7 +12,7 @@ vi.mock("../server/sms.js", () => ({
   },
 }));
 
-import { V1, addAddress, app, cleanupUsers, makeAdmin, openSlot, phones, placeOrder, pool, request } from "./helpers.js";
+import { V1, addAddress, agreeTransport, app, cleanupUsers, makeAdmin, openSlot, phones, placeOrder, pool, request } from "./helpers.js";
 
 const PREFIX = "+2567994";
 const nextPhone = phones(PREFIX);
@@ -76,11 +76,12 @@ describe("Notifications", () => {
     await setStatus(order.id, "confirmed").expect(200);
     await setStatus(order.id, "preparing").expect(200);
     await request(app).patch(`${V1}/admin/orders/${order.id}`).set(staff.h).send({ assignedRider: "Musa 0772000000" }).expect(200);
+    await agreeTransport(staff.h, order.id, 5000).expect(200);
     await setStatus(order.id, "out_for_delivery").expect(200);
     await setStatus(order.id, "delivered").expect(200);
 
     expect((await templatesFor(order.id)).map((r) => r.template)).toEqual([
-      "order_placed", "order_confirmed", "order_out_for_delivery", "order_delivered",
+      "order_placed", "order_confirmed", "order_transport_agreed", "order_out_for_delivery", "order_delivered",
     ]);
     const onTheWay = sms.sent.find((m) => m.body.includes(`order #${order.id} is on the way`))!;
     expect(onTheWay.to).toBe(order.customerPhone);

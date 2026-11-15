@@ -10,6 +10,7 @@ import {
   cartItems,
   otpVerifications,
   refreshTokens,
+  addresses,
   type User,
   type UpsertUser,
   type Category,
@@ -22,6 +23,7 @@ import {
   type InsertCartItem,
 } from "../shared/schema.js";
 import type { IStorage } from "./storage.js";
+import { HttpError } from "./http.js";
 
 type OrderLine = { productId: number; quantity: number; price: string };
 
@@ -62,8 +64,29 @@ export class PostgresStorage implements IStorage {
    */
   async deleteAccount(id: string): Promise<void> {
     await db.transaction(async (tx) => {
+      const [user] = await tx.select().from(users).where(eq(users.id, id)).for("update");
+      if (!user) return;
+
+      // Riders need the address and phone for an order that's still on its way.
+      const { rows: active } = await tx.execute<{ n: string }>(sql`
+        select count(*) as n from orders
+        where user_id = ${id} and status in ('pending','confirmed','preparing','out_for_delivery')`);
+      if (Number(active[0].n) > 0) {
+        throw new HttpError("CONFLICT", "You have an order in progress. You can delete your account once it's delivered or cancelled.");
+      }
+
       await tx.delete(cartItems).where(eq(cartItems.userId, id));
       await tx.delete(refreshTokens).where(eq(refreshTokens.userId, id));
+      await tx.delete(addresses).where(eq(addresses.userId, id));
+      // Orders stay for accounting, but without anything that identifies the person.
+      await tx.execute(sql`
+        update orders set customer_name = null, customer_phone = null, customer_email = null,
+          delivery_address = null, delivery_instructions = null, notes = null,
+          delivery_latitude = null, delivery_longitude = null, updated_at = now()
+        where user_id = ${id}`);
+      await tx.execute(sql`update notifications set recipient = null, body = '[removed: account deleted]' where user_id = ${id}`);
+      await tx.execute(sql`update support_issues set message = '[removed: account deleted]' where user_id = ${id}`);
+      await tx.execute(sql`delete from otp_verifications where phone_number = ${user.phoneNumber}`);
       await tx
         .update(users)
         .set({ phoneNumber: `deleted:${id}`, firstName: null, lastName: null, deletedAt: new Date(), updatedAt: new Date() })

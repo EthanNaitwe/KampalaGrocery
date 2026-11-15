@@ -40,8 +40,9 @@ export async function summary(): Promise<AdminSummary> {
       .from(products)
       .where(sql`${products.stockQuantity} is not null and ${products.stockQuantity} <= ${LOW_STOCK_THRESHOLD} and ${products.inStock} is not false`)
       .orderBy(asc(products.stockQuantity), asc(products.name)),
-    db.execute<{ failed: string; open_issues: string; delivered: string; delivered_total: string }>(sql`
+    db.execute<{ failed: string; open_issues: string; delivered: string; delivered_total: string; to_agree: string }>(sql`
       select
+        (select count(*) from orders where transport_status = 'to_agree' and status in ('pending','confirmed','preparing')) as to_agree,
         (select count(*) from notifications where status = 'failed' and created_at > now() - interval '7 days') as failed,
         (select count(*) from support_issues where status = 'open') as open_issues,
         (select count(*) from orders where status = 'delivered' and slot_date = ${today}::date) as delivered,
@@ -52,6 +53,7 @@ export async function summary(): Promise<AdminSummary> {
   statusRows.forEach((r) => (awaiting[r.status as keyof typeof awaiting] = Number(r.n)));
 
   return {
+    transportToAgree: Number(misc[0].to_agree),
     awaiting,
     todaySlots: slots
       .filter((s) => s.date === today)
@@ -106,7 +108,10 @@ export async function orderDetail(id: number): Promise<AdminOrderDetail> {
     listOrderNotifications(id),
     db.select().from(supportIssues).where(eq(supportIssues.orderId, id)).orderBy(desc(supportIssues.id)),
   ]);
-  return { ...order, events, notifications: notes, issues };
+  const [zone] = order.deliveryZoneId
+    ? await db.select({ fee: deliveryZones.fee }).from(deliveryZones).where(eq(deliveryZones.id, order.deliveryZoneId))
+    : [];
+  return { ...order, events, notifications: notes, issues, zoneGuideFee: zone?.fee ?? null };
 }
 
 export async function assignRider(id: number, rider: string | null, admin: User) {
