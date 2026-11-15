@@ -41,6 +41,8 @@ export function normalizePhoneNumber(phoneNumber: string): string {
   if (cleaned.startsWith("+")) return cleaned;
   if (cleaned.startsWith("256")) return `+${cleaned}`;
   if (cleaned.startsWith("0")) return `+256${cleaned.slice(1)}`;
+  // Local mobile number typed without the leading 0, e.g. 772123456.
+  if (/^7\d{8}$/.test(cleaned)) return `+256${cleaned}`;
   return `+${cleaned}`;
 }
 

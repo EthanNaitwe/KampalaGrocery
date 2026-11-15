@@ -9,7 +9,9 @@ export const OTP_TTL_MS = 10 * 60 * 1000;
 export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 export const OTP_MAX_PER_IDENTIFIER_PER_HOUR = 5;
-export const OTP_MAX_PER_IP_PER_HOUR = Number(process.env.OTP_MAX_PER_IP_PER_HOUR) || 20;
+// Mobile carriers put many customers behind one public IP (carrier-grade NAT), so this is a
+// coarse abuse ceiling, not a per-person limit. Per-number limits above do the real work.
+export const OTP_MAX_PER_IP_PER_HOUR = Number(process.env.OTP_MAX_PER_IP_PER_HOUR) || 60;
 
 // All time comparisons run in SQL against now(): the columns are `timestamp` without time zone,
 // so passing JS Dates through raw queries would be shifted by the server's local offset.

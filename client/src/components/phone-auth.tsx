@@ -182,10 +182,6 @@ export default function PhoneAuth({ hideAuthLogin }: { hideAuthLogin: () => void
     setOtp("");
   };
 
-  const handleGoogleSignIn = () => {
-    window.location.href = "/api/auth/google";
-  };
-
   if (step === "phone") {
     return (
       <Card className="w-full max-w-md mx-auto">
@@ -273,9 +269,6 @@ export default function PhoneAuth({ hideAuthLogin }: { hideAuthLogin: () => void
             </div>
           </div>
 
-          <Button type="button" variant="outline" className="w-full" onClick={handleGoogleSignIn}>
-            Continue with Google
-          </Button>
         </CardContent>
       </Card>
     );
