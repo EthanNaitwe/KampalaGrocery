@@ -5,9 +5,10 @@ import { pool } from "./db.js";
 import { isAuthenticated, sendOTP, verifyOTP, logout, normalizePhoneNumber, startWebSession } from "./smsAuth.js";
 import { issueTokens, revokeAllForUser, rotateRefreshToken, revokeRefreshToken } from "./tokens.js";
 import { changePassword, hasPassword, loginWithPassword, setPassword } from "./passwords.js";
-import { insertProductSchema, insertCategorySchema, sendOtpSchema, verifyOtpSchema } from "../shared/schema.js";
+import { insertProductSchema, sendOtpSchema, verifyOtpSchema } from "../shared/schema.js";
 import {
   passwordLoginBody, passwordResetBody, setPasswordBody, type PasswordStatus,
+  categoryBody, categoryOrderBody, categoryPatchBody, reportIssueBody,
   adminChangePasswordBody, adminForgotBody, adminLoginBody, adminSetPasswordBody, createStaffBody, updateStaffBody,
   idParam,
   productIdParam,
@@ -66,6 +67,7 @@ import {
   changeAdminPassword, createStaff, listStaff, loginAdmin, profile, requestPasswordReset, requireOwner, requireStaff,
   resendInvite, setPasswordWithToken, startAdminSession, updateStaff,
 } from "./adminAuth.js";
+import { createCategory, deleteCategory, listCategoriesWithCounts, reorderCategories, updateCategory } from "./categories.js";
 
 // Stock changes only through POST /products/:id/stock so every change is in the ledger.
 const productWriteSchema = insertProductSchema.omit({ stockQuantity: true });
@@ -217,10 +219,6 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(await storage.getCategories());
   }));
 
-  r.post("/categories", requireStaff, requireOwner, handle(async (req, res) => {
-    const body = parse(insertCategorySchema, req.body);
-    res.status(201).json(await storage.createCategory(body));
-  }));
 
   r.get("/products", handle(async (req, res) => {
     const q = parse(listProductsQuery, req.query);
@@ -407,6 +405,21 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.status(201).json(issue);
   }));
 
+  // The app's Issues section: everything this customer has reported, newest first.
+  r.get("/support/issues", isAuthenticated, handle(async (req, res) => {
+    res.json(await db.select().from(supportIssues).where(eq(supportIssues.userId, req.user.id)).orderBy(desc(supportIssues.id)).limit(100));
+  }));
+
+  r.post("/support/issues", isAuthenticated, handle(async (req, res) => {
+    const { orderId, ...body } = parse(reportIssueBody, req.body);
+    if (orderId) {
+      const order = await storage.getOrder(orderId);
+      if (!order || order.userId !== req.user.id) throw new HttpError("NOT_FOUND", "Order not found");
+    }
+    const [issue] = await db.insert(supportIssues).values({ ...body, orderId: orderId ?? null, userId: req.user.id }).returning();
+    res.status(201).json(issue);
+  }));
+
   r.get("/orders/:id/issues", isAuthenticated, handle(async (req, res) => {
     const order = await ownOrder(req);
     res.json(await db.select().from(supportIssues).where(eq(supportIssues.orderId, order.id)).orderBy(desc(supportIssues.id)));
@@ -477,6 +490,19 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(order);
   }));
   admin.post("/notifications/:id/resend", handle(async (req, res) => res.json(await resendNotification(parse(idParam, req.params).id))));
+  // Owner-only: categories (the app shows them in sortOrder).
+  admin.get("/categories", requireOwner, handle(async (_req, res) => res.json(await listCategoriesWithCounts())));
+  admin.post("/categories", requireOwner, handle(async (req, res) => res.status(201).json(await createCategory(parse(categoryBody, req.body)))));
+  admin.put("/categories/order", requireOwner, handle(async (req, res) => {
+    await reorderCategories(parse(categoryOrderBody, req.body).ids);
+    res.json(await listCategoriesWithCounts());
+  }));
+  admin.patch("/categories/:id", requireOwner, handle(async (req, res) =>
+    res.json(await updateCategory(parse(idParam, req.params).id, parse(categoryPatchBody, req.body)))));
+  admin.delete("/categories/:id", requireOwner, handle(async (req, res) => {
+    await deleteCategory(parse(idParam, req.params).id);
+    res.status(204).send();
+  }));
   admin.get("/delivery/zones", handle(async (_req, res) => res.json(await listAllZones())));
   admin.post("/delivery/zones", requireOwner, handle(async (req, res) => res.status(201).json(await createZone(parse(zoneBody, req.body)))));
   admin.patch("/delivery/zones/:id", requireOwner, handle(async (req, res) =>

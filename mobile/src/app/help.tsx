@@ -1,5 +1,8 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useRouter } from "expo-router";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Button } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
 import { SupportContacts } from "@/components/SupportContacts";
 import { useSlots, useZones } from "@/lib/queries";
 import { colors, formatUGX, radius, shadow, spacing } from "@/lib/theme";
@@ -13,6 +16,8 @@ const steps: Array<{ icon: keyof typeof Ionicons.glyphMap; title: string; body: 
 ];
 
 export default function HelpScreen() {
+  const router = useRouter();
+  const { status } = useAuth();
   const zones = useZones();
   const slots = useSlots();
   const slotLabels = [...new Set((slots.data ?? []).map((x) => x.label))];
@@ -50,7 +55,12 @@ export default function HelpScreen() {
 
       <View style={s.card}>
         <SupportContacts />
-        <Text style={s.body}>Problem with an order? Open it from the Orders tab and tap "Report a problem".</Text>
+        <Text style={s.body}>Something wrong? Report it and follow our reply under My issues.</Text>
+        <Button
+          title={status === "signedIn" ? "My issues" : "Sign in to report a problem"}
+          variant="secondary"
+          onPress={() => router.push(status === "signedIn" ? "/issues" : "/sign-in")}
+        />
       </View>
     </ScrollView>
   );

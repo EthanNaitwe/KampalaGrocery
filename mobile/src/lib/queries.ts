@@ -29,11 +29,12 @@ export const keys = {
   orders: ["orders"] as const,
   order: (id: number) => ["order", id] as const,
   orderIssues: (id: number) => ["orderIssues", id] as const,
+  myIssues: ["myIssues"] as const,
   support: ["support"] as const,
 };
 
 /** Keys holding per-user data; cleared on sign-out. */
-export const userScopedKeys = [keys.cart, keys.addresses, keys.orders, ["order"], ["quote"], ["orderIssues"]];
+export const userScopedKeys = [keys.cart, keys.addresses, keys.orders, ["order"], ["quote"], ["orderIssues"], ["myIssues"]];
 
 export function useCategories() {
   return useQuery({ queryKey: keys.categories, queryFn: () => api<CategoryResponse[]>("/categories") });
@@ -210,11 +211,20 @@ export function useOrderIssues(orderId: number) {
   });
 }
 
-export function useReportIssue(orderId: number) {
+/** Everything this customer has reported (the app's Issues section). */
+export function useMyIssues() {
+  return useQuery({ queryKey: keys.myIssues, queryFn: () => authedApi<IssueResponse[]>("/support/issues") });
+}
+
+/** Report a problem, about an order or (orderId null) in general. */
+export function useReportIssue() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: { category: string; message: string }) =>
-      authedApi<IssueResponse>(`/orders/${orderId}/issues`, { method: "POST", body }),
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.orderIssues(orderId) }),
+    mutationFn: (body: { category: string; message: string; orderId: number | null }) =>
+      authedApi<IssueResponse>("/support/issues", { method: "POST", body }),
+    onSuccess: (issue) => {
+      client.invalidateQueries({ queryKey: keys.myIssues });
+      if (issue.orderId) client.invalidateQueries({ queryKey: keys.orderIssues(issue.orderId) });
+    },
   });
 }

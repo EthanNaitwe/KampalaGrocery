@@ -39,6 +39,7 @@ function RootStack() {
         <Stack.Screen name="orders/[id]" options={{ title: "Order" }} />
         <Stack.Screen name="password" options={{ title: "Password", presentation: "modal" }} />
         <Stack.Screen name="report" options={{ title: "Report a problem", presentation: "modal" }} />
+        <Stack.Screen name="issues" options={{ title: "My issues" }} />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="sign-in" options={{ title: "Sign in", presentation: "modal" }} />

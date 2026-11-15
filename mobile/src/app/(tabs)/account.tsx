@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/States";
 import { Button, Field, styles } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
+import { useMyIssues } from "@/lib/queries";
 import { authedApi, saveUser } from "@/lib/session";
 import { colors, radius, shadow, spacing } from "@/lib/theme";
 
@@ -26,7 +27,9 @@ export default function AccountTab() {
   return <AccountScreen />;
 }
 
-function MenuRow({ icon, label, onPress, last }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; last?: boolean }) {
+function MenuRow({ icon, label, onPress, last, badge }: {
+  icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; last?: boolean; badge?: number;
+}) {
   return (
     <Pressable
       onPress={onPress}
@@ -35,6 +38,11 @@ function MenuRow({ icon, label, onPress, last }: { icon: keyof typeof Ionicons.g
     >
       <View style={s.menuIcon}><Ionicons name={icon} size={20} color={colors.primary} /></View>
       <Text style={s.menuLabel}>{label}</Text>
+      {!!badge && (
+        <View style={s.badge} accessibilityLabel={`${badge} open`}>
+          <Text style={s.badgeText}>{badge} open</Text>
+        </View>
+      )}
       <Ionicons name="chevron-forward" size={18} color={colors.muted} />
     </Pressable>
   );
@@ -43,6 +51,8 @@ function MenuRow({ icon, label, onPress, last }: { icon: keyof typeof Ionicons.g
 function AccountScreen() {
   const router = useRouter();
   const { user, signOut, deleteAccount } = useAuth();
+  const issues = useMyIssues();
+  const openIssues = issues.data?.filter((i) => i.status !== "resolved").length ?? 0;
   const [firstName, setFirstName] = useState(user?.firstName ?? "");
   const [lastName, setLastName] = useState(user?.lastName ?? "");
   const [saving, setSaving] = useState(false);
@@ -107,6 +117,7 @@ function AccountScreen() {
 
       <View style={[s.card, { paddingVertical: spacing.xs }, shadow]}>
         <MenuRow icon="receipt-outline" label="My orders" onPress={() => router.navigate("/orders")} />
+        <MenuRow icon="chatbubbles-outline" label="My issues" badge={openIssues} onPress={() => router.push("/issues")} />
         <MenuRow icon="lock-closed-outline" label="Password" onPress={() => router.push("/password")} />
         <MenuRow icon="help-circle-outline" label="Help & support" onPress={() => router.push("/help")} last />
       </View>
@@ -129,5 +140,7 @@ const s = StyleSheet.create({
   menuRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md },
   menuDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   menuIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" },
+  badge: { backgroundColor: colors.warning, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  badgeText: { color: colors.onPrimary, fontSize: 12, fontWeight: "700" },
   menuLabel: { flex: 1, fontSize: 16, color: colors.text, fontWeight: "500" },
 });

@@ -9,6 +9,7 @@ import {
   orders,
   products,
   supportIssues,
+  users,
   type Admin,
 } from "../shared/schema.js";
 import {
@@ -154,9 +155,11 @@ export async function updateSlot(id: number, b: z.infer<typeof slotPatchBody>) {
 // ---- Support issues -------------------------------------------------------------
 export function listIssues(status: "open" | "resolved" | "all") {
   return db
-    .select({ issue: supportIssues, customerPhone: orders.customerPhone })
+    // General issues have no order, so fall back to the account's phone number.
+    .select({ issue: supportIssues, customerPhone: sql<string | null>`coalesce(${orders.customerPhone}, ${users.phoneNumber})` })
     .from(supportIssues)
     .leftJoin(orders, eq(orders.id, supportIssues.orderId))
+    .leftJoin(users, eq(users.id, supportIssues.userId))
     .where(status === "all" ? undefined : eq(supportIssues.status, status))
     .orderBy(desc(supportIssues.createdAt))
     .limit(200)

@@ -261,6 +261,8 @@ export interface SupportInfo {
   hours: string | null;
 }
 export type IssueResponse = SupportIssue;
+/** Report from the app's Issues section: about an order, or general (no order). */
+export const reportIssueBody = createIssueBody.extend({ orderId: z.number().int().positive().nullable().optional() });
 
 // ---- Staff console ------------------------------------------------------------
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM (24h)");
@@ -370,4 +372,21 @@ export interface StaffMember extends AdminProfile {
   hasPassword: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+}
+
+// ---- Categories (owners) ------------------------------------------------------
+const categoryName = z.string().trim().min(1, "Enter a name").max(100);
+/** One emoji (flags and skin tones are several code points, so allow a few). */
+const categoryIcon = z.string().trim().max(16, "Use a single emoji").nullable();
+
+export const categoryBody = z.object({ name: categoryName, icon: categoryIcon.optional() });
+export const categoryPatchBody = z
+  .object({ name: categoryName.optional(), icon: categoryIcon.optional() })
+  .refine((b) => b.name !== undefined || b.icon !== undefined, { message: "Nothing to change" });
+/** Every category id, in the new order. */
+export const categoryOrderBody = z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) });
+
+export interface AdminCategory extends CategoryResponse {
+  /** Products in this category (a category with products can't be deleted). */
+  productCount: number;
 }
