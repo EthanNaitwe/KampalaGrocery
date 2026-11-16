@@ -217,6 +217,13 @@ export async function placeOrder(user: User, body: PlaceOrderBody, key: string):
       if (Number(used[0].n) >= slot.capacity) throw new HttpError("CONFLICT", "That delivery slot just filled up. Please pick another.");
 
       const { a: address, zone } = await loadAddress(tx, user.id, body.addressId);
+      // Cash on delivery: staff call to agree transport, so every order needs a phone.
+      const customerPhone = address.contactPhone || user.phoneNumber;
+      if (!customerPhone) {
+        throw new HttpError("VALIDATION_ERROR", "Add a contact phone to this address so we can call you about delivery", {
+          field: "contactPhone",
+        });
+      }
       // Lock the cart rows so a concurrent cart edit can't change what's being bought.
       await tx.execute(sql`select id from cart_items where user_id = ${user.id} for update`);
       const cart = await loadCart(tx, user.id);
@@ -241,8 +248,8 @@ export async function placeOrder(user: User, body: PlaceOrderBody, key: string):
           total: q.total,
           transportStatus: "to_agree",
           customerName: body.customerName || [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
-          customerPhone: address.contactPhone || (user.phoneNumber.includes("@") ? null : user.phoneNumber),
-          customerEmail: user.phoneNumber.includes("@") ? user.phoneNumber : null,
+          customerPhone,
+          customerEmail: user.email,
           deliveryAddress: [address.label, address.line].filter(Boolean).join(" - "),
           deliveryInstructions: address.instructions,
           deliveryLatitude: address.latitude,

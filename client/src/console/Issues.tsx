@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, fmtDateTime } from "./api";
 import { PageHeader } from "./Layout";
 
-type Row = IssueResponse & { customerPhone: string | null };
+type Row = IssueResponse & { customerPhone: string | null; customerEmail: string | null };
 
 export default function Issues() {
   const [status, setStatus] = useState<"open" | "resolved" | "all">("open");
@@ -59,6 +59,7 @@ function IssueCard({ issue }: { issue: Row }) {
           <span className="font-semibold">{issueCategoryLabels[issue.category as keyof typeof issueCategoryLabels] ?? issue.category}</span>
           {issue.orderId && <span className="text-muted-foreground">Order #{issue.orderId}</span>}
           {issue.customerPhone && <a className="text-primary" href={`tel:${issue.customerPhone}`}>{issue.customerPhone}</a>}
+          {issue.customerEmail && <a className="text-primary" href={`mailto:${issue.customerEmail}`}>{issue.customerEmail}</a>}
           <span className="ml-auto text-muted-foreground">{fmtDateTime(issue.createdAt)}</span>
         </div>
         <p className="whitespace-pre-wrap">{issue.message}</p>

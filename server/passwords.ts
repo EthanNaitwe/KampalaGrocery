@@ -35,13 +35,14 @@ async function burnTime(password: string) {
   await checkPassword(password, await dummyHash);
 }
 
-const invalid = () => new HttpError("UNAUTHORIZED", "Wrong phone number or password");
+const invalid = (byEmail: boolean) => new HttpError("UNAUTHORIZED", byEmail ? "Wrong email or password" : "Wrong phone number or password");
 
 type Row = { hash: string; locked_minutes: number | null };
 
-/** Checks phone + password. Locks the account for LOCK_MINUTES after MAX_FAILED_ATTEMPTS wrong tries in a row. */
-export async function loginWithPassword(phoneNumber: string, password: string): Promise<User> {
-  const user = await storage.getUserByPhone(phoneNumber);
+/** Checks phone-or-email + password (identifier already normalized). Locks the account for LOCK_MINUTES after MAX_FAILED_ATTEMPTS wrong tries in a row. */
+export async function loginWithPassword(identifier: string, password: string): Promise<User> {
+  const byEmail = identifier.includes("@");
+  const user = await (byEmail ? storage.getUserByEmail(identifier) : storage.getUserByPhone(identifier));
   let row: Row | undefined;
   if (user && !user.deletedAt) {
     const { rows } = await db.execute<Row>(sql`
@@ -53,7 +54,7 @@ export async function loginWithPassword(phoneNumber: string, password: string): 
 
   if (!user || !row) {
     await burnTime(password);
-    throw invalid();
+    throw invalid(byEmail);
   }
   if (row.locked_minutes) {
     throw new HttpError(
@@ -68,7 +69,7 @@ export async function loginWithPassword(phoneNumber: string, password: string): 
           then now() + make_interval(mins => ${LOCK_MINUTES}) else locked_until end,
         failed_attempts = case when failed_attempts + 1 >= ${MAX_FAILED_ATTEMPTS} then 0 else failed_attempts + 1 end
       where user_id = ${user.id}`);
-    throw invalid();
+    throw invalid(byEmail);
   }
   await clearFailures(user.id);
   return user;

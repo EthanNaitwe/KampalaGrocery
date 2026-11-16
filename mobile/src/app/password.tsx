@@ -54,8 +54,8 @@ export default function PasswordScreen() {
         <Text style={styles.title} accessibilityRole="header">{has ? "Change password" : "Set a password"}</Text>
         <Text style={styles.body}>
           {has
-            ? "You can sign in with your phone number and password, or with an SMS code."
-            : "Add a password to sign in without waiting for an SMS code. Codes keep working too."}
+            ? "You can sign in with your password, or with a code we send you."
+            : "Add a password to sign in without waiting for a code. Codes keep working too."}
         </Text>
         {has && (
           <PasswordField label="Current password" value={current} onChangeText={setCurrent} autoComplete="current-password" textContentType="password" />

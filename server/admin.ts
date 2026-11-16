@@ -155,15 +155,19 @@ export async function updateSlot(id: number, b: z.infer<typeof slotPatchBody>) {
 // ---- Support issues -------------------------------------------------------------
 export function listIssues(status: "open" | "resolved" | "all") {
   return db
-    // General issues have no order, so fall back to the account's phone number.
-    .select({ issue: supportIssues, customerPhone: sql<string | null>`coalesce(${orders.customerPhone}, ${users.phoneNumber})` })
+    // General issues have no order, so fall back to the account's phone number (and show its email).
+    .select({
+      issue: supportIssues,
+      customerPhone: sql<string | null>`coalesce(${orders.customerPhone}, ${users.phoneNumber})`,
+      customerEmail: sql<string | null>`coalesce(${orders.customerEmail}, ${users.email})`,
+    })
     .from(supportIssues)
     .leftJoin(orders, eq(orders.id, supportIssues.orderId))
     .leftJoin(users, eq(users.id, supportIssues.userId))
     .where(status === "all" ? undefined : eq(supportIssues.status, status))
     .orderBy(desc(supportIssues.createdAt))
     .limit(200)
-    .then((rows) => rows.map((r) => ({ ...r.issue, customerPhone: r.customerPhone })));
+    .then((rows) => rows.map((r) => ({ ...r.issue, customerPhone: r.customerPhone, customerEmail: r.customerEmail })));
 }
 
 export async function resolveIssue(id: number, status: "open" | "resolved", resolution: string | undefined, admin: Admin) {

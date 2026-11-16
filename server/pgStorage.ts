@@ -39,6 +39,25 @@ export class PostgresStorage implements IStorage {
     return row;
   }
 
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [row] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+    return row;
+  }
+
+  async createUser(data: { phoneNumber?: string; email?: string; firstName?: string }): Promise<User> {
+    const [row] = await db
+      .insert(users)
+      .values({ id: nanoid(), phoneNumber: data.phoneNumber ?? null, email: data.email?.toLowerCase() ?? null, firstName: data.firstName })
+      .returning();
+    return row;
+  }
+
+  async setIdentifier(id: string, field: "phoneNumber" | "email", value: string): Promise<User> {
+    const [row] = await db.update(users).set({ [field]: value, updatedAt: new Date() }).where(eq(users.id, id)).returning();
+    if (!row) throw new Error("User not found");
+    return row;
+  }
+
   async upsertUser(userData: UpsertUser): Promise<User> {
     const { id, createdAt, ...updatable } = userData;
     const [row] = await db
@@ -60,7 +79,7 @@ export class PostgresStorage implements IStorage {
 
   /**
    * Erases personal data while keeping order records (needed for accounting/refunds).
-   * The phone/email is replaced so it can be used to register a fresh account.
+   * The phone and email are cleared so they can be used to register a fresh account.
    */
   async deleteAccount(id: string): Promise<void> {
     await db.transaction(async (tx) => {
@@ -87,10 +106,13 @@ export class PostgresStorage implements IStorage {
         where user_id = ${id}`);
       await tx.execute(sql`update notifications set recipient = null, body = '[removed: account deleted]' where user_id = ${id}`);
       await tx.execute(sql`update support_issues set message = '[removed: account deleted]' where user_id = ${id}`);
-      await tx.execute(sql`delete from otp_verifications where phone_number = ${user.phoneNumber}`);
+      for (const ident of [user.phoneNumber, user.email]) {
+        if (ident) await tx.execute(sql`delete from otp_verifications where phone_number = ${ident}`);
+      }
+      // Clearing the phone and email frees them to register a fresh account.
       await tx
         .update(users)
-        .set({ phoneNumber: `deleted:${id}`, firstName: null, lastName: null, deletedAt: new Date(), updatedAt: new Date() })
+        .set({ phoneNumber: null, email: null, firstName: null, lastName: null, deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(users.id, id));
       await tx.execute(sql`delete from sessions where sess->>'userId' = ${id}`);
     });

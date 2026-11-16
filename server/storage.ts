@@ -15,6 +15,10 @@ export interface IStorage {
   // User operations
   getUser(id: string): Promise<User | undefined>;
   getUserByPhone(phoneNumber: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  createUser(data: { phoneNumber?: string; email?: string; firstName?: string }): Promise<User>;
+  /** Adds a verified phone or email to an existing account. */
+  setIdentifier(id: string, field: "phoneNumber" | "email", value: string): Promise<User>;
   upsertUser(user: UpsertUser): Promise<User>;
   updateProfile(id: string, profile: { firstName?: string | null; lastName?: string | null }): Promise<User>;
   deleteAccount(id: string): Promise<void>;

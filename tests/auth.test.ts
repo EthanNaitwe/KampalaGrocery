@@ -227,8 +227,8 @@ describe("Account deletion", () => {
     expect((await request(app).get(`${V1}/auth/me`).set(bearer(s.accessToken))).status).toBe(401);
     expect((await request(app).post(`${V1}/auth/refresh`).send({ refreshToken: s.refreshToken })).status).toBe(401);
 
-    const { rows } = await pool.query("select phone_number, deleted_at from users where id = $1", [s.user.id]);
-    expect(rows[0].phone_number).toBe(`deleted:${s.user.id}`);
+    const { rows } = await pool.query("select phone_number, email, deleted_at from users where id = $1", [s.user.id]);
+    expect(rows[0]).toMatchObject({ phone_number: null, email: null });
     expect(rows[0].deleted_at).not.toBeNull();
 
     await pool.query("update otp_verifications set created_at = now() - interval '2 minutes' where phone_number = $1", [s.phone]);

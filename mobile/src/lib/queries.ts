@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AddressResponse,
+  AuthMethods,
+  UserResponse,
   CartItemResponse,
   CategoryResponse,
   CreateAddressBody,
@@ -14,8 +16,8 @@ import type {
   ZoneResponse,
 } from "@shared/api";
 import { api } from "./api";
-import { useAuth } from "./auth";
-import { authedApi } from "./session";
+import { identifierBody, useAuth } from "./auth";
+import { authedApi, saveUser } from "./session";
 
 export const keys = {
   categories: ["categories"] as const,
@@ -31,10 +33,36 @@ export const keys = {
   orderIssues: (id: number) => ["orderIssues", id] as const,
   myIssues: ["myIssues"] as const,
   support: ["support"] as const,
+  authMethods: ["authMethods"] as const,
 };
 
 /** Keys holding per-user data; cleared on sign-out. */
 export const userScopedKeys = [keys.cart, keys.addresses, keys.orders, ["order"], ["quote"], ["orderIssues"], ["myIssues"]];
+
+/** Which sign-in methods the server offers (email follows EMAIL_OTP_ENABLED). Phone only until known. */
+export function useAuthMethods() {
+  return useQuery({
+    queryKey: keys.authMethods,
+    queryFn: () => api<AuthMethods>("/auth/methods"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Signed in: send a code to a phone or email to add to the account. */
+export function useStartLink() {
+  return useMutation({
+    mutationFn: (identifier: string) => authedApi("/auth/link", { method: "POST", body: identifierBody(identifier) }),
+  });
+}
+
+/** Confirm the code; the phone or email is added and the saved user updated. */
+export function useFinishLink() {
+  return useMutation({
+    mutationFn: ({ identifier, otp }: { identifier: string; otp: string }) =>
+      authedApi<UserResponse>("/auth/link/verify", { method: "POST", body: { ...identifierBody(identifier), otp } }),
+    onSuccess: (user) => saveUser(user),
+  });
+}
 
 export function useCategories() {
   return useQuery({ queryKey: keys.categories, queryFn: () => api<CategoryResponse[]>("/categories") });

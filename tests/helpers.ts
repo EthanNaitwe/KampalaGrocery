@@ -68,8 +68,17 @@ export async function placeOrder(
 }
 
 /** Removes everything created by users whose phone starts with `prefix`. */
-export async function cleanupUsers(prefix: string) {
-  const ids = (await pool.query("select id from users where phone_number like $1", [`${prefix}%`])).rows.map((r) => r.id);
+/** Deletes test customers whose phone starts with `prefix` (or, if given, whose email matches `emailLike`). */
+export async function cleanupUsers(prefix: string, emailLike?: string) {
+  const ids = (
+    // Deleted accounts lose their phone and email, so they're matched by being fully anonymised.
+    // That's safe because tests always run on their own database (see global-setup.ts).
+    await pool.query(
+      `select id from users where phone_number like $1 or email like $2
+         or (deleted_at is not null and phone_number is null and email is null)`,
+      [`${prefix}%`, emailLike ?? null],
+    )
+  ).rows.map((r) => r.id);
   const orderIds = "(select id from orders where user_id = any($1))";
   await pool.query(`delete from notifications where user_id = any($1) or order_id in ${orderIds}`, [ids]);
   await pool.query(`delete from support_issues where user_id = any($1) or order_id in ${orderIds}`, [ids]);
@@ -83,7 +92,7 @@ export async function cleanupUsers(prefix: string) {
   await pool.query("delete from orders where user_id = any($1)", [ids]);
   await pool.query("delete from cart_items where user_id = any($1)", [ids]);
   await pool.query("delete from users where id = any($1)", [ids]); // addresses + refresh tokens cascade
-  await pool.query("delete from otp_verifications where phone_number like $1", [`${prefix}%`]);
+  await pool.query("delete from otp_verifications where phone_number like $1 or phone_number like $2", [`${prefix}%`, emailLike ?? null]);
   await cleanupStaff(prefix);
 }
 

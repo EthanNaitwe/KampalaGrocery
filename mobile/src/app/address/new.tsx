@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ErrorState, Loading } from "@/components/States";
 import { Button, Field, styles } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { mapsUrl, matchZone, pinCurrentLocation, type Pin } from "@/lib/location";
 import { toE164Uganda } from "@/lib/phone";
@@ -14,6 +15,8 @@ export default function NewAddressScreen() {
   const router = useRouter();
   const zones = useZones();
   const create = useCreateAddress();
+  // Email-only accounts have no number for the rider or staff to call, so the address needs one.
+  const needsPhone = !useAuth().user?.phoneNumber;
   const [zoneId, setZoneId] = useState<number>();
   const [label, setLabel] = useState("");
   const [line, setLine] = useState("");
@@ -50,6 +53,7 @@ export default function NewAddressScreen() {
     if (line.trim().length < 3) e.line = "Enter the street, building or a landmark";
     const contactPhone = phone.trim() ? toE164Uganda(phone) : undefined;
     if (phone.trim() && !contactPhone) e.phone = "Enter a valid Ugandan mobile number";
+    else if (needsPhone && !contactPhone) e.phone = "Add a phone number so we can call you about delivery";
     setErrors(e);
     if (Object.keys(e).length) return;
 
@@ -149,7 +153,14 @@ export default function NewAddressScreen() {
         <Field label="Street, building or landmark" value={line} onChangeText={setLine} placeholder="Plot 12, Acacia Avenue" autoComplete="street-address" error={errors.line} maxLength={300} />
         <Field label="Label (optional)" value={label} onChangeText={setLabel} placeholder="Home, Work…" maxLength={50} />
         <Field label="Directions for the rider (optional)" value={instructions} onChangeText={setInstructions} placeholder="Blue gate opposite the church" multiline maxLength={500} />
-        <Field label="Contact phone (optional)" value={phone} onChangeText={setPhone} placeholder="Defaults to your account number" keyboardType="phone-pad" error={errors.phone} />
+        <Field
+          label={needsPhone ? "Contact phone" : "Contact phone (optional)"}
+          value={phone}
+          onChangeText={setPhone}
+          placeholder={needsPhone ? "0772 123456" : "Defaults to your account number"}
+          keyboardType="phone-pad"
+          error={errors.phone}
+        />
       </View>
 
       {!!create.error && <Text style={styles.error}>{errorMessage(create.error)}</Text>}

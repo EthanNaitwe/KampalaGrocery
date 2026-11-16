@@ -29,3 +29,6 @@ export const devLogOtp = !isProduction && process.env.DEV_LOG_OTP === "true";
  * shared between requests, background timers don't run, and the filesystem isn't available.
  */
 export const onWorkers = (globalThis as any).navigator?.userAgent === "Cloudflare-Workers";
+
+/** EMAIL_OTP_ENABLED=true lets customers sign up and sign in with an email code instead of SMS. */
+export const emailOtpEnabled = () => process.env.EMAIL_OTP_ENABLED === "true";

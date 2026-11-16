@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/States";
 import { Button, Field, styles } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
-import { useMyIssues } from "@/lib/queries";
+import { useAuthMethods, useMyIssues } from "@/lib/queries";
 import { authedApi, saveUser } from "@/lib/session";
 import { colors, radius, shadow, spacing } from "@/lib/theme";
 
@@ -19,7 +19,7 @@ export default function AccountTab() {
       <EmptyState
         icon="person-outline"
         title="Your FreshMart account"
-        body="Sign in with your phone number to save your cart and track orders."
+        body="Sign in to save your cart and track orders."
         action={<Button title="Sign in" onPress={() => router.push("/sign-in")} />}
       />
     );
@@ -48,11 +48,35 @@ function MenuRow({ icon, label, onPress, last, badge }: {
   );
 }
 
+/** A phone or email on the account, or a link to add it (you can sign in with either). */
+function DetailRow({ icon, label, value, addLabel, onAdd }: {
+  icon: keyof typeof Ionicons.glyphMap; label: string; value?: string | null; addLabel: string; onAdd?: () => void;
+}) {
+  return (
+    <View style={s.detail}>
+      <Ionicons name={icon} size={20} color={colors.muted} />
+      <View style={{ flex: 1 }}>
+        <Text style={s.detailLabel}>{label}</Text>
+        {value ? (
+          <Text style={s.detailValue} numberOfLines={1}>{value}</Text>
+        ) : onAdd ? (
+          <Pressable onPress={onAdd} accessibilityRole="button" hitSlop={6}>
+            <Text style={s.detailAdd}>{addLabel}</Text>
+          </Pressable>
+        ) : (
+          <Text style={s.detailValue}>Not set</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
 function AccountScreen() {
   const router = useRouter();
   const { user, signOut, deleteAccount } = useAuth();
   const issues = useMyIssues();
   const openIssues = issues.data?.filter((i) => i.status !== "resolved").length ?? 0;
+  const emailAllowed = useAuthMethods().data?.email === true;
   const [firstName, setFirstName] = useState(user?.firstName ?? "");
   const [lastName, setLastName] = useState(user?.lastName ?? "");
   const [saving, setSaving] = useState(false);
@@ -103,7 +127,7 @@ function AccountScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.name} numberOfLines={1}>{displayName || "Add your name"}</Text>
-          <Text style={styles.body}>{user?.phoneNumber}</Text>
+          <Text style={styles.body} numberOfLines={1}>{user?.phoneNumber ?? user?.email}</Text>
         </View>
       </View>
 
@@ -113,6 +137,26 @@ function AccountScreen() {
         <Field label="Last name" value={lastName} onChangeText={setLastName} autoComplete="family-name" maxLength={100} error={error} />
         {!!message && !dirty && <Text style={[styles.body, { color: colors.primary }]} accessibilityLiveRegion="polite">{message}</Text>}
         <Button title="Save" onPress={save} loading={saving} disabled={!dirty} />
+      </View>
+
+      <View style={[s.card, shadow]}>
+        <Text style={s.h}>Sign-in details</Text>
+        <DetailRow
+          icon="call-outline"
+          label="Phone"
+          value={user?.phoneNumber}
+          addLabel="Add phone number"
+          onAdd={() => router.push({ pathname: "/link", params: { kind: "phone" } })}
+        />
+        {(emailAllowed || !!user?.email) && (
+          <DetailRow
+            icon="mail-outline"
+            label="Email"
+            value={user?.email}
+            addLabel="Add email"
+            onAdd={emailAllowed ? () => router.push({ pathname: "/link", params: { kind: "email" } }) : undefined}
+          />
+        )}
       </View>
 
       <View style={[s.card, { paddingVertical: spacing.xs }, shadow]}>
@@ -142,5 +186,9 @@ const s = StyleSheet.create({
   menuIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" },
   badge: { backgroundColor: colors.warning, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { color: colors.onPrimary, fontSize: 12, fontWeight: "700" },
+  detail: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  detailLabel: { fontSize: 13, color: colors.muted },
+  detailValue: { fontSize: 16, color: colors.text, fontWeight: "500" },
+  detailAdd: { fontSize: 16, color: colors.primary, fontWeight: "600" },
   menuLabel: { flex: 1, fontSize: 16, color: colors.text, fontWeight: "500" },
 });

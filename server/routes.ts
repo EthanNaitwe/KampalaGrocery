@@ -2,12 +2,16 @@ import { Router, type Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.js";
 import { pool } from "./db.js";
-import { isAuthenticated, sendOTP, verifyOTP, logout, normalizePhoneNumber, startWebSession } from "./smsAuth.js";
+import {
+  finishLink, isAuthenticated, logout, passwordIdentifier, sendOTP, startLink, startWebSession, verifyOTP,
+} from "./smsAuth.js";
+import { emailOtpEnabled } from "./config.js";
 import { issueTokens, revokeAllForUser, rotateRefreshToken, revokeRefreshToken } from "./tokens.js";
 import { changePassword, hasPassword, loginWithPassword, setPassword } from "./passwords.js";
 import { insertProductSchema, sendOtpSchema, verifyOtpSchema } from "../shared/schema.js";
 import {
   passwordLoginBody, passwordResetBody, setPasswordBody, type PasswordStatus,
+  linkStartBody, linkVerifyBody, type AuthMethods,
   categoryBody, categoryOrderBody, categoryPatchBody, reportIssueBody,
   adminChangePasswordBody, adminForgotBody, adminLoginBody, adminSetPasswordBody, createStaffBody, updateStaffBody,
   idParam,
@@ -133,11 +137,29 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
     res.json(response);
   }));
 
+  // What the app's sign-in screen should offer.
+  r.get("/auth/methods", (_req, res) => {
+    res.json({ email: emailOtpEnabled() } satisfies AuthMethods);
+  });
+
+  // Signed in: add the other sign-in method (phone or email). Step 1 sends a code to it.
+  r.post("/auth/link", isAuthenticated, handle(async (req, res) => {
+    const body = parse(linkStartBody, req.body);
+    await startLink(req.user, body.email ?? body.phoneNumber!, req.ip);
+    res.json(codeSent);
+  }));
+
+  // Step 2: the code proves it's theirs; it's added to the account.
+  r.post("/auth/link/verify", isAuthenticated, handle(async (req, res) => {
+    const body = parse(linkVerifyBody, req.body);
+    res.json(await finishLink(req.user, body.email ?? body.phoneNumber!, body.otp));
+  }));
+
   // ---- Password sign-in (optional alternative to codes) ---------------------
   // Mobile: phone + password for tokens. Wrong tries lock the account for a while (see passwords.ts).
   r.post("/auth/password/login", handle(async (req, res) => {
     const body = parse(passwordLoginBody, req.body);
-    const user = await loginWithPassword(normalizePhoneNumber(body.phoneNumber), body.password);
+    const user = await loginWithPassword(passwordIdentifier(body), body.password);
     const response: TokenResponse = { ...(await issueTokens(user.id, body.deviceName)), user };
     res.json(response);
   }));
@@ -145,7 +167,7 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   // Web console: phone + password for a cookie session.
   r.post("/auth/password/session", handle(async (req, res) => {
     const body = parse(passwordLoginBody, req.body);
-    const user = await loginWithPassword(normalizePhoneNumber(body.phoneNumber), body.password);
+    const user = await loginWithPassword(passwordIdentifier(body), body.password);
     await startWebSession(req, user);
     res.json({ message: "Signed in", user });
   }));
@@ -154,7 +176,7 @@ function buildApiRouter(version: "v1" | "legacy"): Router {
   // Every other device is signed out, since whoever knew the old password may be using it.
   r.post("/auth/password/reset", handle(async (req, res) => {
     const body = parse(passwordResetBody, req.body);
-    const user = await verifyOTP(body.phoneNumber, body.otp);
+    const user = await verifyOTP(body.email ?? body.phoneNumber!, body.otp);
     await setPassword(user.id, body.password);
     await revokeAllForUser(user.id);
     const response: TokenResponse = { ...(await issueTokens(user.id, body.deviceName)), user };

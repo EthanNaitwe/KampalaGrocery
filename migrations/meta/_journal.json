@@ -64,6 +64,13 @@
       "when": 1794782304164,
       "tag": "0008_category_order",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794827427881,
+      "tag": "0009_customer_email",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { pool } from "./db.js";
 import { storage } from "./storage.js";
 import { HttpError, sendError } from "./http.js";
-import { devLogOtp, isProduction, onWorkers, requireSecret } from "./config.js";
+import { devLogOtp, emailOtpEnabled, isProduction, onWorkers, requireSecret } from "./config.js";
 import { issueCode, verifyCode, OTP_TTL_MS } from "./otp.js";
 import { verifyAccessToken } from "./tokens.js";
 import { sendSms, smsConfigured } from "./sms.js";
@@ -94,8 +94,23 @@ async function deliverCode(identifier: string, code: string) {
 }
 
 // ---- OTP flow ---------------------------------------------------------------
+const isEmailIdentifier = (v: string) => v.includes("@");
+
+/** Email codes are only accepted while EMAIL_OTP_ENABLED is on. */
+function assertMethodAllowed(normalized: string) {
+  if (isEmailIdentifier(normalized) && !emailOtpEnabled()) {
+    throw new HttpError("VALIDATION_ERROR", "Email sign-in isn't available. Use your phone number.");
+  }
+}
+
+/** The account a phone number or email belongs to, if any. */
+export function findUserByIdentifier(normalized: string) {
+  return isEmailIdentifier(normalized) ? storage.getUserByEmail(normalized) : storage.getUserByPhone(normalized);
+}
+
 export async function sendOTP(identifier: string, ip: string | undefined): Promise<void> {
   const normalized = normalizeAuthIdentifier(identifier);
+  assertMethodAllowed(normalized);
   const code = await issueCode(normalized, ip);
   await deliverCode(normalized, code);
 }
@@ -103,20 +118,63 @@ export async function sendOTP(identifier: string, ip: string | undefined): Promi
 /** Verifies the code and returns the (possibly new) user. Throws a generic error on failure. */
 export async function verifyOTP(identifier: string, code: string): Promise<User> {
   const normalized = normalizeAuthIdentifier(identifier);
+  assertMethodAllowed(normalized);
   if (!(await verifyCode(normalized, code))) {
     throw new HttpError("UNAUTHORIZED", "Invalid or expired code");
   }
-  const existing = await storage.getUserByPhone(normalized);
+  const existing = await findUserByIdentifier(normalized);
   if (existing) {
-    // Proving the number with a code also lifts any wrong-password lock.
+    // Proving the number (or email) with a code also lifts any wrong-password lock.
     await clearFailures(existing.id);
     return existing;
   }
-  return storage.upsertUser({
-    id: nanoid(),
-    phoneNumber: normalized,
-    firstName: normalized.includes("@") ? normalized.split("@")[0] : undefined,
-  });
+  return isEmailIdentifier(normalized)
+    ? storage.createUser({ email: normalized, firstName: normalized.split("@")[0] })
+    : storage.createUser({ phoneNumber: normalized });
+}
+
+/** Normalized identifier for password sign-in; email only while email sign-in is on. */
+export function passwordIdentifier(body: { phoneNumber?: string; email?: string }): string {
+  const normalized = normalizeAuthIdentifier(body.email ?? body.phoneNumber!);
+  assertMethodAllowed(normalized);
+  return normalized;
+}
+
+// ---- Linking: add the other sign-in method to a signed-in account -----------
+async function checkLinkable(user: User, normalized: string) {
+  assertMethodAllowed(normalized);
+  const field = isEmailIdentifier(normalized) ? "email" : "phoneNumber";
+  if (user[field] === normalized) throw new HttpError("CONFLICT", "That's already on your account");
+  if (user[field]) {
+    throw new HttpError("CONFLICT", field === "email" ? "Your account already has an email" : "Your account already has a phone number");
+  }
+  const other = await findUserByIdentifier(normalized);
+  if (other && other.id !== user.id) {
+    throw new HttpError("CONFLICT", `That ${field === "email" ? "email" : "phone number"} already has its own FreshMart account`);
+  }
+  return field;
+}
+
+/** Sends a code to a phone or email the signed-in customer wants to add. */
+export async function startLink(user: User, identifier: string, ip: string | undefined) {
+  const normalized = normalizeAuthIdentifier(identifier);
+  await checkLinkable(user, normalized);
+  const code = await issueCode(normalized, ip);
+  await deliverCode(normalized, code);
+}
+
+/** Checks the code and adds the phone or email to the account. */
+export async function finishLink(user: User, identifier: string, code: string): Promise<User> {
+  const normalized = normalizeAuthIdentifier(identifier);
+  const field = await checkLinkable(user, normalized);
+  if (!(await verifyCode(normalized, code))) throw new HttpError("UNAUTHORIZED", "Invalid or expired code");
+  try {
+    return await storage.setIdentifier(user.id, field, normalized);
+  } catch (e: any) {
+    // Someone registered it between the check and now.
+    if (e?.code === "23505") throw new HttpError("CONFLICT", "That's already used by another FreshMart account");
+    throw e;
+  }
 }
 
 /** Starts a web cookie session for the user (regenerates the session id to prevent fixation). */

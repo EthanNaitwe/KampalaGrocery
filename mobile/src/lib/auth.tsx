@@ -12,14 +12,18 @@ import {
   saveSession,
 } from "./session";
 
+/** Request body field for what the customer typed: an email or a phone number. */
+export const identifierBody = (id: string) => (id.includes("@") ? { email: id } : { phoneNumber: id });
+
 type AuthState = {
   status: "loading" | "signedOut" | "signedIn";
   user: UserResponse | null;
-  requestCode: (phoneNumber: string) => Promise<void>;
-  verifyCode: (phoneNumber: string, otp: string) => Promise<void>;
-  signInWithPassword: (phoneNumber: string, password: string) => Promise<void>;
-  /** Forgot password (or sign up with one): a code proves the number and sets the new password. */
-  resetPassword: (phoneNumber: string, otp: string, password: string) => Promise<void>;
+  /** Each takes a phone number (E.164) or an email. */
+  requestCode: (identifier: string) => Promise<void>;
+  verifyCode: (identifier: string, otp: string) => Promise<void>;
+  signInWithPassword: (identifier: string, password: string) => Promise<void>;
+  /** Forgot password (or sign up with one): a code proves the phone or email and sets the new password. */
+  resetPassword: (identifier: string, otp: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
 };
@@ -50,30 +54,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
-  const requestCode = useCallback(async (phoneNumber: string) => {
-    await api("/auth/otp", { method: "POST", body: { phoneNumber } });
+  const requestCode = useCallback(async (identifier: string) => {
+    await api("/auth/otp", { method: "POST", body: identifierBody(identifier) });
   }, []);
 
-  const verifyCode = useCallback(async (phoneNumber: string, otp: string) => {
+  const verifyCode = useCallback(async (identifier: string, otp: string) => {
     const t = await api<TokenResponse>("/auth/token", {
       method: "POST",
-      body: { phoneNumber, otp, deviceName: `FreshMart ${Platform.OS}` },
+      body: { ...identifierBody(identifier), otp, deviceName: `FreshMart ${Platform.OS}` },
     });
     await saveSession(t);
   }, []);
 
-  const signInWithPassword = useCallback(async (phoneNumber: string, password: string) => {
+  const signInWithPassword = useCallback(async (identifier: string, password: string) => {
     const t = await api<TokenResponse>("/auth/password/login", {
       method: "POST",
-      body: { phoneNumber, password, deviceName: `FreshMart ${Platform.OS}` },
+      body: { ...identifierBody(identifier), password, deviceName: `FreshMart ${Platform.OS}` },
     });
     await saveSession(t);
   }, []);
 
-  const resetPassword = useCallback(async (phoneNumber: string, otp: string, password: string) => {
+  const resetPassword = useCallback(async (identifier: string, otp: string, password: string) => {
     const t = await api<TokenResponse>("/auth/password/reset", {
       method: "POST",
-      body: { phoneNumber, otp, password, deviceName: `FreshMart ${Platform.OS}` },
+      body: { ...identifierBody(identifier), otp, password, deviceName: `FreshMart ${Platform.OS}` },
     });
     await saveSession(t);
   }, []);

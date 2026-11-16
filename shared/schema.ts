@@ -32,7 +32,10 @@ export const sessions = pgTable(
 // User storage table.
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().notNull(),
-  phoneNumber: varchar("phone_number").unique().notNull(),
+  /** Verified phone (E.164). Null for email-only accounts. */
+  phoneNumber: varchar("phone_number").unique(),
+  /** Verified email, lower-case. Null for phone-only accounts. */
+  email: varchar("email", { length: 200 }).unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   deletedAt: timestamp("deleted_at"),

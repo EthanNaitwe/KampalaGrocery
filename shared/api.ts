@@ -58,20 +58,31 @@ export const tokenRequestBody = z
 
 export const passwordRule = z.string().min(8, "Use at least 8 characters").max(128, "Use at most 128 characters");
 
-/** Sign in with phone number and password. */
-export const passwordLoginBody = z.object({
-  phoneNumber: z.string().trim().min(7).max(20),
-  password: z.string().min(1).max(128),
-  deviceName: z.string().trim().max(100).optional(),
-});
+/** Sign in with a phone number or email, and a password. */
+export const passwordLoginBody = z
+  .object({ ...identifier, password: z.string().min(1).max(128), deviceName: z.string().trim().max(100).optional() })
+  .refine(hasIdentifier, { message: "Provide a phone number or email", path: ["phoneNumber"] });
 
-/** Forgot password, or sign up with a password: prove the number with a code and set a new password. */
-export const passwordResetBody = z.object({
-  phoneNumber: z.string().trim().min(7).max(20),
-  otp: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
-  password: passwordRule,
-  deviceName: z.string().trim().max(100).optional(),
-});
+/** Forgot password, or sign up with a password: prove the phone or email with a code and set a new password. */
+export const passwordResetBody = z
+  .object({
+    ...identifier,
+    otp: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
+    password: passwordRule,
+    deviceName: z.string().trim().max(100).optional(),
+  })
+  .refine(hasIdentifier, { message: "Provide a phone number or email", path: ["phoneNumber"] });
+
+/** Add the other sign-in method (a phone or an email) to a signed-in account: send a code, then confirm it. */
+export const linkStartBody = requestCodeBody;
+export const linkVerifyBody = z
+  .object({ ...identifier, otp: z.string().regex(/^\d{6}$/, "Code must be 6 digits") })
+  .refine(hasIdentifier, { message: "Provide a phone number or email", path: ["phoneNumber"] });
+
+/** Which sign-in methods the app should offer. */
+export interface AuthMethods {
+  email: boolean;
+}
 
 /** Set or change a password while signed in. `currentPassword` is required when one is already set. */
 export const setPasswordBody = z.object({

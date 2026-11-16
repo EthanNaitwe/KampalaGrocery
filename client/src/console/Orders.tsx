@@ -276,7 +276,10 @@ function OrderSheet({ id, onClose }: { id: number | null; onClose: () => void })
 
             <section className="space-y-1">
               <div className="font-semibold">Customer & delivery</div>
-              <div>{o.customerName || "—"} · <a className="text-primary" href={`tel:${o.customerPhone}`}>{o.customerPhone}</a></div>
+              <div>
+                {o.customerName || "—"} · <a className="text-primary" href={`tel:${o.customerPhone}`}>{o.customerPhone}</a>
+                {o.customerEmail && <> · <a className="text-primary" href={`mailto:${o.customerEmail}`}>{o.customerEmail}</a></>}
+              </div>
               <div>{fmtSlotDate(o.slotDate)} · {o.slotLabel}</div>
               <div>{o.deliveryAddress} · {o.deliveryZoneName}</div>
               {o.deliveryInstructions && <div className="text-muted-foreground">Directions: {o.deliveryInstructions}</div>}
