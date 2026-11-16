@@ -1,6 +1,7 @@
 // Cloudflare Workers: one Worker serves the staff console (static assets) and the API (/api/*).
-// Secrets (DATABASE_URL, SESSION_SECRET, JWT_SECRET, OTP_SECRET, BREVO_API_KEY, SMTP_*, TWILIO_*)
-// are set with `npx wrangler secret put <NAME>`, never in this file. Brevo sends email; Twilio sends SMS.
+// Secrets (DATABASE_URL, SESSION_SECRET, JWT_SECRET, OTP_SECRET, BREVO_API_KEY, SMTP_*,
+// AT_USERNAME, AT_API_KEY, AT_SENDER_ID) are set with `npx wrangler secret put <NAME>`, never in
+// this file. Brevo sends email; Africa's Talking sends SMS (Twilio is the fallback).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "freshmart",
