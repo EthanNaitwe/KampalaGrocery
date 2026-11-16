@@ -9,11 +9,11 @@
     "preview": {
       "distribution": "internal",
       "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-STAGING-URL" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://freshmart.ethanarinaitwe36.workers.dev" }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-PRODUCTION-URL" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://freshmart.ethanarinaitwe36.workers.dev" }
     }
   },
   "submit": { "production": {} }

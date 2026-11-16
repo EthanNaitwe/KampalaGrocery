@@ -156,7 +156,9 @@ async function deliver(to: string, subject: string, body: ReturnType<typeof butt
 
 /** A message the owner can act on, without exposing server details. */
 function emailFailureMessage(error: any) {
-  if (error?.code === "EAUTH") return "The email server rejected the SMTP login. Check SMTP_USER and SMTP_PASS (Gmail needs an App Password).";
+  if (error?.code === "EAUTH") return process.env.BREVO_API_KEY
+    ? "Brevo rejected the API key. Check BREVO_API_KEY."
+    : "The email server rejected the SMTP login. Check SMTP_USER and SMTP_PASS (Gmail needs an App Password).";
   if (["ECONNECTION", "ETIMEDOUT", "ESOCKET", "EDNS"].includes(error?.code)) return "Couldn't reach the email server. Check SMTP_HOST and SMTP_PORT.";
   return "Could not send the email. Please try again.";
 }

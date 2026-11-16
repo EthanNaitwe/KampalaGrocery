@@ -1,7 +1,17 @@
 import nodemailer from "nodemailer";
 
-/** SMTP settings: SMTP_HOST, SMTP_PORT (587), SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM. */
-export const emailConfigured = () => !!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS;
+/**
+ * Email goes through Brevo's HTTP API when BREVO_API_KEY is set (required on Cloudflare Workers,
+ * which can't do SMTP STARTTLS), otherwise SMTP: SMTP_HOST, SMTP_PORT (587), SMTP_SECURE,
+ * SMTP_USER, SMTP_PASS. The sender is SMTP_FROM ("Name <address>" or an address) or SMTP_USER.
+ */
+const useBrevo = () => !!process.env.BREVO_API_KEY;
+const fromHeader = () => process.env.SMTP_FROM || process.env.SMTP_USER || "";
+
+export const emailConfigured = () =>
+  useBrevo()
+    ? !!fromHeader()
+    : !!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS;
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 function getMailer() {
@@ -17,8 +27,38 @@ function getMailer() {
   return transporter;
 }
 
+/** "FreshMart <a@b.com>" -> { name, email }; "a@b.com" -> { email }. */
+export function parseSender(from: string): { name?: string; email: string } {
+  const m = from.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  if (m) return { ...(m[1] ? { name: m[1] } : {}), email: m[2].trim() };
+  return { name: "FreshMart", email: from.trim() };
+}
+
+async function sendWithBrevo(msg: { to: string; subject: string; text: string; html: string }) {
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: { "api-key": process.env.BREVO_API_KEY!, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      sender: parseSender(fromHeader()),
+      to: [{ email: msg.to }],
+      subject: msg.subject,
+      textContent: msg.text,
+      htmlContent: msg.html,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
+    // Same shape nodemailer uses, so emailFailureMessage() can explain it.
+    throw Object.assign(new Error(body.message ?? `Brevo returned ${res.status}`), {
+      code: res.status === 401 ? "EAUTH" : (body.code ?? `HTTP_${res.status}`),
+    });
+  }
+}
+
 export async function sendEmail(msg: { to: string; subject: string; text: string; html: string }) {
-  await getMailer().sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, ...msg });
+  if (useBrevo()) return sendWithBrevo(msg);
+  await getMailer().sendMail({ from: fromHeader(), ...msg });
 }
 
 const escape = (s: string) =>
