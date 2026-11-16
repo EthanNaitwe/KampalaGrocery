@@ -16,6 +16,8 @@
   },
   "vars": {
     "NODE_ENV": "production",
+    // Customers can sign up and sign in with an email code (set "false" to offer phone only).
+    "EMAIL_OTP_ENABLED": "true",
     // Base of the links in staff invite and password-reset emails.
     "CONSOLE_URL": "https://freshmart.ethanarinaitwe36.workers.dev"
   },
