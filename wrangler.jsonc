@@ -1,0 +1,21 @@
+// Cloudflare Workers: one Worker serves the staff console (static assets) and the API (/api/*).
+// Secrets (DATABASE_URL, SESSION_SECRET, JWT_SECRET, OTP_SECRET, SMTP_*, TWILIO_*) are set with
+// `npx wrangler secret put <NAME>`, never in this file.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "freshmart",
+  "main": "server/worker.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "alias": { "ws": "./server/ws-shim.ts", "iconv-lite": "./server/iconv-shim.ts" },
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "NODE_ENV": "production"
+  },
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": { "enabled": true }
+}

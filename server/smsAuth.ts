@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { pool } from "./db.js";
 import { storage } from "./storage.js";
 import { HttpError, sendError } from "./http.js";
-import { devLogOtp, isProduction, requireSecret } from "./config.js";
+import { devLogOtp, isProduction, onWorkers, requireSecret } from "./config.js";
 import { issueCode, verifyCode, OTP_TTL_MS } from "./otp.js";
 import { verifyAccessToken } from "./tokens.js";
 import { sendSms, smsConfigured } from "./sms.js";
@@ -17,7 +17,10 @@ import type { User } from "../shared/schema.js";
 export function getSession() {
   return session({
     secret: requireSecret("SESSION_SECRET"),
-    store: new (connectPgSimple(session))({ pool: pool as any, tableName: "sessions", createTableIfMissing: false }),
+    store: new (connectPgSimple(session))({ pool: pool as any, tableName: "sessions", createTableIfMissing: false,
+      // Workers can't run background timers; expired rows are ignored on read (see the cron in worker.ts).
+      pruneSessionInterval: onWorkers ? false : undefined,
+    }),
     resave: false,
     saveUninitialized: false,
     cookie: {

@@ -23,3 +23,9 @@ export function requireSecret(name: "SESSION_SECRET" | "JWT_SECRET" | "OTP_SECRE
 
 /** Only true when explicitly enabled outside production. Never logs codes in production. */
 export const devLogOtp = !isProduction && process.env.DEV_LOG_OTP === "true";
+
+/**
+ * True inside Cloudflare Workers. There, I/O objects (like a database connection) can't be
+ * shared between requests, background timers don't run, and the filesystem isn't available.
+ */
+export const onWorkers = (globalThis as any).navigator?.userAgent === "Cloudflare-Workers";
