@@ -19,9 +19,9 @@ export default function SignInScreen() {
   const { requestCode, signInWithPassword } = useAuth();
   const emailAllowed = useAuthMethods().data?.email === true;
   const [method, setMethod] = useState<Method>("code");
-  const [chosenVia, setVia] = useState<Via>("phone");
-  // Falls back to phone if email sign-in gets switched off.
-  const via: Via = emailAllowed ? chosenVia : "phone";
+  const [chosenVia, setVia] = useState<Via | null>(null);
+  // Email first while it's on (SMS delivery isn't live yet); phone if email sign-in is switched off.
+  const via: Via = emailAllowed ? (chosenVia ?? "email") : "phone";
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
