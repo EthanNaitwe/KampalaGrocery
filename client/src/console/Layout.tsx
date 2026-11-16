@@ -56,11 +56,11 @@ export function ConsoleLayout({ admin, children }: { admin: AdminProfile; childr
           <div className="font-medium text-foreground truncate">{admin.name}</div>
           <div className="truncate">{admin.email}</div>
           <div className="capitalize">{admin.role}</div>
-          <div className="flex flex-col items-start pt-1">
-            <Button variant="ghost" size="sm" className="px-0" onClick={() => setChanging(true)}>
+          <div className="flex flex-col gap-1 pt-2">
+            <Button variant="ghost" size="sm" className="w-full justify-start px-2" onClick={() => setChanging(true)}>
               <KeyRound className="h-4 w-4 mr-1" /> Change password
             </Button>
-            <Button variant="ghost" size="sm" className="px-0" onClick={() => void signOut()}>
+            <Button variant="ghost" size="sm" className="w-full justify-start px-2" onClick={() => void signOut()}>
               <LogOut className="h-4 w-4 mr-1" /> Sign out
             </Button>
           </div>
